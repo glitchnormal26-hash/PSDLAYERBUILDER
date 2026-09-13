@@ -22,8 +22,10 @@ export async function replaceSmartObject(options: ReplaceSmartObjectOptions): Pr
   const output = path.resolve(options.output);
   const warnings: string[] = [];
 
+  // Keep untouched bitmap channels compressed/raw. This avoids a Canvas dependency,
+  // reduces memory usage, and preserves source layer pixels without a decode/re-encode cycle.
   const psd: any = readPsd(await readFile(template), {
-    useImageData: true,
+    useRawData: true,
     useRawThumbnail: true,
   });
   const layer = findLayerByName(psd.children ?? [], options.layerName);
@@ -43,6 +45,7 @@ export async function replaceSmartObject(options: ReplaceSmartObjectOptions): Pr
   const transform = layer.placedLayer.transform;
   if (Array.isArray(transform) && transform.length === 8) {
     const warped = warpPerspective(await readRgba(artwork), transform as Quad);
+    layer.rawData = undefined;
     layer.imageData = warped.image;
     layer.canvas = undefined;
     layer.left = warped.left;
@@ -56,7 +59,8 @@ export async function replaceSmartObject(options: ReplaceSmartObjectOptions): Pr
     warnings.push('Smart object has no supported 8-point transform; embedded source was replaced but its layer cache was left unchanged.');
   }
 
-  // Avoid shipping a stale flattened preview after replacing the smart-object source.
+  // Do not preserve stale flattened pixels after replacing a smart-object source.
+  psd.rawCompositeData = undefined;
   psd.imageData = undefined;
   psd.canvas = undefined;
   if (psd.imageResources) {
