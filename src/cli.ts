@@ -10,14 +10,17 @@ const program = new Command();
 program
   .name('psdlayer')
   .description('Build, validate and modify editable layered PSD mockups')
-  .version('1.0.0');
+  .version('1.1.0');
 
 program.command('build')
   .argument('<manifest>', 'Path to mockup manifest JSON')
   .requiredOption('-o, --output <file>', 'Output PSD file')
+  .option('--no-composite', 'Skip the flattened convenience composite for lower RAM/CPU usage')
   .action(async (manifest, options) => {
     try {
-      const result = await buildMockupFile(manifest, options.output);
+      const result = await buildMockupFile(manifest, options.output, {
+        generateComposite: options.composite !== false,
+      });
       console.log(`PSD written: ${result.output}`);
       console.log(`Layers: ${result.layerCount} | Smart objects: ${result.smartObjectCount} | Bytes: ${result.bytes}`);
       for (const warning of result.warnings) console.warn(`Warning: ${warning}`);

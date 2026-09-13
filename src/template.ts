@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { readPsd, writePsdBuffer } from 'ag-psd';
-import { imageMetadata, readRgba } from './image.js';
+import { imageMetadataFromBytes, readRgbaFromBytes, type RgbaImage } from './image.js';
 import { warpPerspective } from './perspective.js';
 import { replacementMapSchema } from './schema.js';
 import type {
@@ -24,37 +24,77 @@ interface IndexedLayer {
   displayPath: string;
 }
 
-interface PreparedReplacement {
-  target: IndexedLayer;
+interface LayerIndex {
+  all: IndexedLayer[];
+  byName: Map<string, IndexedLayer[]>;
+  byPath: Map<string, IndexedLayer[]>;
+  byLinkId: Map<string, IndexedLayer[]>;
+}
+
+interface ArtworkAsset {
   artworkPath: string;
   artworkBytes: Uint8Array;
   width: number;
   height: number;
+}
+
+interface PreparedReplacement extends ArtworkAsset {
+  target: IndexedLayer;
   linkId: string;
 }
 
-function indexLayers(layers: any[], parent: string[] = []): IndexedLayer[] {
-  const result: IndexedLayer[] = [];
-  for (const layer of layers) {
-    const name = layer.name ?? '(unnamed)';
-    const layerPath = [...parent, name];
-    result.push({ layer, name, path: layerPath, displayPath: layerPath.join('/') });
-    if (Array.isArray(layer.children)) result.push(...indexLayers(layer.children, layerPath));
-  }
-  return result;
+interface LinkGroup {
+  linkId: string;
+  primary: PreparedReplacement;
+  selected: PreparedReplacement[];
+  affected: IndexedLayer[];
 }
 
-function selectLayer(index: IndexedLayer[], selector: SmartObjectSelector): IndexedLayer {
+function pathKey(parts: string[]): string {
+  return parts.join('\u0000');
+}
+
+function pushMapValue<K, V>(map: Map<K, V[]>, key: K, value: V): void {
+  const existing = map.get(key);
+  if (existing) existing.push(value);
+  else map.set(key, [value]);
+}
+
+function createLayerIndex(layers: any[]): LayerIndex {
+  const index: LayerIndex = {
+    all: [],
+    byName: new Map(),
+    byPath: new Map(),
+    byLinkId: new Map(),
+  };
+
+  const visit = (items: any[], parent: string[]): void => {
+    for (const layer of items) {
+      const name = layer.name ?? '(unnamed)';
+      const layerPath = [...parent, name];
+      const entry: IndexedLayer = { layer, name, path: layerPath, displayPath: layerPath.join('/') };
+      index.all.push(entry);
+      pushMapValue(index.byName, name, entry);
+      pushMapValue(index.byPath, pathKey(layerPath), entry);
+      if (layer.placedLayer?.id) pushMapValue(index.byLinkId, layer.placedLayer.id, entry);
+      if (Array.isArray(layer.children)) visit(layer.children, layerPath);
+    }
+  };
+
+  visit(layers, []);
+  return index;
+}
+
+function selectLayer(index: LayerIndex, selector: SmartObjectSelector): IndexedLayer {
   if (selector.path?.length) {
-    const matches = index.filter((entry) =>
-      entry.path.length === selector.path!.length && entry.path.every((part, i) => part === selector.path![i]));
+    const matches = index.byPath.get(pathKey(selector.path)) ?? [];
     if (matches.length === 0) throw new Error(`Layer path not found: ${selector.path.join('/')}`);
     if (matches.length > 1) throw new Error(`Layer path is ambiguous: ${selector.path.join('/')}`);
     return matches[0];
   }
 
   if (!selector.name) throw new Error('Smart-object selector requires name or path');
-  const matches = index.filter((entry) => entry.name === selector.name);
+  const matches = index.byName.get(selector.name) ?? [];
   if (matches.length === 0) throw new Error(`Layer not found: ${selector.name}`);
   if (matches.length > 1) {
     const choices = matches.map((entry) => entry.displayPath).join(', ');
@@ -95,9 +135,28 @@ function clearFlattenedPreview(psd: any): void {
   }
 }
 
-async function prepareReplacements(index: IndexedLayer[], replacements: SmartObjectReplacement[], cwd: string): Promise<PreparedReplacement[]> {
+function loadArtworkAsset(cache: Map<string, Promise<ArtworkAsset>>, artworkPath: string): Promise<ArtworkAsset> {
+  let pending = cache.get(artworkPath);
+  if (!pending) {
+    pending = (async () => {
+      const artworkBytes = await readFile(artworkPath);
+      const metadata = await imageMetadataFromBytes(artworkBytes, artworkPath);
+      return {
+        artworkPath,
+        artworkBytes,
+        width: metadata.width,
+        height: metadata.height,
+      };
+    })();
+    cache.set(artworkPath, pending);
+  }
+  return pending;
+}
+
+async function prepareReplacements(index: LayerIndex, replacements: SmartObjectReplacement[], cwd: string): Promise<PreparedReplacement[]> {
   const prepared: PreparedReplacement[] = [];
   const selectedPaths = new Set<string>();
+  const artworkCache = new Map<string, Promise<ArtworkAsset>>();
 
   for (const replacement of replacements) {
     const target = selectLayer(index, replacement.selector);
@@ -106,18 +165,8 @@ async function prepareReplacements(index: IndexedLayer[], replacements: SmartObj
 
     if (!target.layer.placedLayer?.id) throw new Error(`Layer is not a smart object: ${target.displayPath}`);
     const artworkPath = resolveArtwork(cwd, replacement.artwork);
-    const [artworkBytes, metadata] = await Promise.all([
-      readFile(artworkPath).then((bytes) => new Uint8Array(bytes)),
-      imageMetadata(artworkPath),
-    ]);
-    prepared.push({
-      target,
-      artworkPath,
-      artworkBytes,
-      width: metadata.width,
-      height: metadata.height,
-      linkId: target.layer.placedLayer.id,
-    });
+    const asset = await loadArtworkAsset(artworkCache, artworkPath);
+    prepared.push({ ...asset, target, linkId: target.layer.placedLayer.id });
   }
 
   const artworkByLink = new Map<string, string>();
@@ -131,14 +180,20 @@ async function prepareReplacements(index: IndexedLayer[], replacements: SmartObj
   return prepared;
 }
 
-async function refreshInstanceCache(entry: IndexedLayer, prepared: PreparedReplacement, warnings: string[]): Promise<void> {
+async function refreshInstanceCache(
+  entry: IndexedLayer,
+  prepared: PreparedReplacement,
+  sourceImage: RgbaImage | undefined,
+  warnings: string[],
+): Promise<void> {
   const layer = entry.layer;
   layer.placedLayer.width = prepared.width;
   layer.placedLayer.height = prepared.height;
   const transform = layer.placedLayer.transform;
 
   if (Array.isArray(transform) && transform.length === 8) {
-    const warped = warpPerspective(await readRgba(prepared.artworkPath), transform as Quad);
+    if (!sourceImage) throw new Error(`Internal cache error while rendering ${entry.displayPath}`);
+    const warped = warpPerspective(sourceImage, transform as Quad);
     layer.rawData = undefined;
     layer.imageData = warped.image;
     layer.canvas = undefined;
@@ -154,6 +209,17 @@ async function refreshInstanceCache(entry: IndexedLayer, prepared: PreparedRepla
   }
 }
 
+function createLinkGroups(index: LayerIndex, prepared: PreparedReplacement[]): LinkGroup[] {
+  const selectedByLink = new Map<string, PreparedReplacement[]>();
+  for (const item of prepared) pushMapValue(selectedByLink, item.linkId, item);
+  return [...selectedByLink.entries()].map(([linkId, selected]) => ({
+    linkId,
+    primary: selected[0],
+    selected,
+    affected: index.byLinkId.get(linkId) ?? [],
+  }));
+}
+
 export async function replaceSmartObjects(options: ReplaceSmartObjectsOptions): Promise<ReplaceSmartObjectsResult> {
   if (options.replacements.length === 0) throw new Error('At least one replacement is required');
   if (options.replacements.length > 1000) throw new Error('Replacement count exceeds the 1000 item safety limit');
@@ -164,35 +230,42 @@ export async function replaceSmartObjects(options: ReplaceSmartObjectsOptions): 
   const warnings: string[] = [];
 
   const psd: any = readPsd(await readFile(template), { useRawData: true, useRawThumbnail: true });
-  const index = indexLayers(psd.children ?? []);
+  const index = createLayerIndex(psd.children ?? []);
   const prepared = await prepareReplacements(index, options.replacements, cwd);
-  const linkedFiles = psd.linkedFiles ?? [];
+  const linkedById = new Map<string, any>((psd.linkedFiles ?? []).map((file: any) => [file.id, file]));
   const applied: AppliedReplacement[] = [];
+  const linkGroups = createLinkGroups(index, prepared);
+  const groupsByArtwork = new Map<string, LinkGroup[]>();
+  for (const group of linkGroups) pushMapValue(groupsByArtwork, group.primary.artworkPath, group);
 
-  const preparedByLink = new Map<string, PreparedReplacement>();
-  for (const item of prepared) preparedByLink.set(item.linkId, item);
+  for (const artworkGroups of groupsByArtwork.values()) {
+    const needsDecodedCache = artworkGroups.some((group) =>
+      group.affected.some((entry) => Array.isArray(entry.layer.placedLayer?.transform) && entry.layer.placedLayer.transform.length === 8));
+    const sourceImage = needsDecodedCache
+      ? await readRgbaFromBytes(artworkGroups[0].primary.artworkBytes)
+      : undefined;
 
-  for (const [linkId, item] of preparedByLink) {
-    const linked = linkedFiles.find((file: any) => file.id === linkId);
-    if (!linked) throw new Error(`Embedded source for smart object "${item.target.displayPath}" was not found`);
-    linked.data = item.artworkBytes;
-    linked.name = path.basename(item.artworkPath);
+    for (const group of artworkGroups) {
+      const item = group.primary;
+      const linked = linkedById.get(group.linkId);
+      if (!linked) throw new Error(`Embedded source for smart object "${item.target.displayPath}" was not found`);
+      linked.data = item.artworkBytes;
+      linked.name = path.basename(item.artworkPath);
 
-    const affected = index.filter((entry) => entry.layer.placedLayer?.id === linkId);
-    for (const instance of affected) await refreshInstanceCache(instance, item, warnings);
+      for (const instance of group.affected) await refreshInstanceCache(instance, item, sourceImage, warnings);
 
-    const selected = prepared.filter((candidate) => candidate.linkId === linkId);
-    for (const selectedItem of selected) {
-      applied.push({
-        layerPath: selectedItem.target.displayPath,
-        artwork: selectedItem.artworkPath,
-        linkedFileId: linkId,
-        affectedLayerPaths: affected.map((entry) => entry.displayPath),
-      });
-    }
+      for (const selectedItem of group.selected) {
+        applied.push({
+          layerPath: selectedItem.target.displayPath,
+          artwork: selectedItem.artworkPath,
+          linkedFileId: group.linkId,
+          affectedLayerPaths: group.affected.map((entry) => entry.displayPath),
+        });
+      }
 
-    if (affected.length > selected.length) {
-      warnings.push(`Replacement for "${item.target.displayPath}" also updated ${affected.length - selected.length} shared smart-object instance(s).`);
+      if (group.affected.length > group.selected.length) {
+        warnings.push(`Replacement for "${item.target.displayPath}" also updated ${group.affected.length - group.selected.length} shared smart-object instance(s).`);
+      }
     }
   }
 

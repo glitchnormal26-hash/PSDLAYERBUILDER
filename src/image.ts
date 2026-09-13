@@ -6,19 +6,51 @@ export interface RgbaImage {
   data: Uint8Array;
 }
 
-export async function readRgba(file: string, width?: number, height?: number): Promise<RgbaImage> {
-  let pipeline = sharp(file, { failOn: 'error' }).ensureAlpha();
+function asBuffer(data: Uint8Array): Buffer {
+  return Buffer.isBuffer(data)
+    ? data
+    : Buffer.from(data.buffer, data.byteOffset, data.byteLength);
+}
+
+async function decodeRgba(input: string | Uint8Array, width?: number, height?: number): Promise<RgbaImage> {
+  const source = typeof input === 'string' ? input : asBuffer(input);
+  let pipeline = sharp(source, { failOn: 'error' }).ensureAlpha();
   if (width || height) {
     pipeline = pipeline.resize({ width, height, fit: 'fill', withoutEnlargement: false });
   }
   const { data, info } = await pipeline.raw().toBuffer({ resolveWithObject: true });
-  return { width: info.width, height: info.height, data: new Uint8Array(data) };
+  return { width: info.width, height: info.height, data };
+}
+
+export async function readRgba(file: string, width?: number, height?: number): Promise<RgbaImage> {
+  return decodeRgba(file, width, height);
+}
+
+export async function readRgbaFromBytes(bytes: Uint8Array, width?: number, height?: number): Promise<RgbaImage> {
+  return decodeRgba(bytes, width, height);
+}
+
+async function metadataFrom(input: string | Uint8Array): Promise<{ width: number; height: number }> {
+  const source = typeof input === 'string' ? input : asBuffer(input);
+  const metadata = await sharp(source).metadata();
+  if (!metadata.width || !metadata.height) throw new Error('Unable to determine image dimensions');
+  return { width: metadata.width, height: metadata.height };
 }
 
 export async function imageMetadata(file: string): Promise<{ width: number; height: number }> {
-  const metadata = await sharp(file).metadata();
-  if (!metadata.width || !metadata.height) throw new Error(`Unable to determine image dimensions: ${file}`);
-  return { width: metadata.width, height: metadata.height };
+  try {
+    return await metadataFrom(file);
+  } catch (error) {
+    throw new Error(`Unable to determine image dimensions: ${file}`, { cause: error });
+  }
+}
+
+export async function imageMetadataFromBytes(bytes: Uint8Array, label = 'image'): Promise<{ width: number; height: number }> {
+  try {
+    return await metadataFrom(bytes);
+  } catch (error) {
+    throw new Error(`Unable to determine image dimensions: ${label}`, { cause: error });
+  }
 }
 
 export function parseHexColor(hex = '#000000'): { r: number; g: number; b: number } {

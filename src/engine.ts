@@ -18,9 +18,12 @@ interface CompileContext {
   layerCount: number;
   warnings: string[];
   compositeEntries: CompositeEntry[];
+  collectComposite: boolean;
   warnedCompositeClipping: boolean;
   warnedCompositeEffects: boolean;
   warnedVectorFeather: boolean;
+  metadataCache: Map<string, Promise<{ width: number; height: number }>>;
+  sourceBytesCache: Map<string, Promise<Uint8Array>>;
 }
 
 interface CompositeEntry {
@@ -43,13 +46,31 @@ function resolveSource(cwd: string, source: string): string {
   return path.resolve(cwd, source);
 }
 
+function getMetadata(ctx: CompileContext, source: string): Promise<{ width: number; height: number }> {
+  let pending = ctx.metadataCache.get(source);
+  if (!pending) {
+    pending = imageMetadata(source);
+    ctx.metadataCache.set(source, pending);
+  }
+  return pending;
+}
+
+function getSourceBytes(ctx: CompileContext, source: string): Promise<Uint8Array> {
+  let pending = ctx.sourceBytesCache.get(source);
+  if (!pending) {
+    pending = readFile(source).then((bytes) => bytes as Uint8Array);
+    ctx.sourceBytesCache.set(source, pending);
+  }
+  return pending;
+}
+
 function commonLayer(spec: LayerSpec, ctx: CompileContext) {
   const effects = compileEffects(spec.effects);
-  if (effects && !ctx.warnedCompositeEffects) {
+  if (ctx.collectComposite && effects && !ctx.warnedCompositeEffects) {
     ctx.warnings.push('Layer effects are stored as editable Photoshop effects; the convenience composite preview does not rasterize them.');
     ctx.warnedCompositeEffects = true;
   }
-  if (spec.clipping && !ctx.warnedCompositeClipping) {
+  if (ctx.collectComposite && spec.clipping && !ctx.warnedCompositeClipping) {
     ctx.warnings.push('Clipping masks are stored natively; the convenience composite preview does not emulate clipping groups.');
     ctx.warnedCompositeClipping = true;
   }
@@ -148,7 +169,7 @@ async function compileLayer(spec: LayerSpec, ctx: CompileContext): Promise<any> 
   }
 
   const source = resolveSource(ctx.cwd, spec.source);
-  const original = await imageMetadata(source);
+  const original = await getMetadata(ctx, source);
   let preview: RgbaImage;
   let x: number;
   let y: number;
@@ -193,15 +214,18 @@ async function compileLayer(spec: LayerSpec, ctx: CompileContext): Promise<any> 
 
   const mask = spec.mask ? await compileMask(spec.mask, x, y, preview.width, preview.height, ctx) : undefined;
   const vectorMask = spec.vectorMask ? compileVectorMask(spec.vectorMask) : undefined;
-  let compositePreview = mask ? applyMaskForComposite(preview, x, y, mask) : preview;
-  if (spec.vectorMask) {
-    compositePreview = applyVectorMaskForComposite(compositePreview, x, y, spec.vectorMask);
-    if ((spec.vectorMask.feather ?? 0) > 0 && !ctx.warnedVectorFeather) {
-      ctx.warnings.push('Vector-mask feather is stored natively in the PSD; the convenience composite preview uses a hard vector edge.');
-      ctx.warnedVectorFeather = true;
+
+  if (ctx.collectComposite && spec.visible !== false) {
+    let compositePreview = mask ? applyMaskForComposite(preview, x, y, mask) : preview;
+    if (spec.vectorMask) {
+      compositePreview = applyVectorMaskForComposite(compositePreview, x, y, spec.vectorMask);
+      if ((spec.vectorMask.feather ?? 0) > 0 && !ctx.warnedVectorFeather) {
+        ctx.warnings.push('Vector-mask feather is stored natively in the PSD; the convenience composite preview uses a hard vector edge.');
+        ctx.warnedVectorFeather = true;
+      }
     }
+    ctx.compositeEntries.push({ image: compositePreview, left: x, top: y, opacity: spec.opacity ?? 1 });
   }
-  if (spec.visible !== false) ctx.compositeEntries.push({ image: compositePreview, left: x, top: y, opacity: spec.opacity ?? 1 });
 
   let nativeMask = mask?.native;
   if (spec.vectorMask) {
@@ -235,7 +259,7 @@ async function compileLayer(spec: LayerSpec, ctx: CompileContext): Promise<any> 
     ctx.smartObjectCount += 1;
     const linkId = randomUUID();
     const placedId = randomUUID();
-    const sourceBytes = new Uint8Array(await readFile(source));
+    const sourceBytes = await getSourceBytes(ctx, source);
     ctx.linkedFiles.push({ id: linkId, name: path.basename(source), data: sourceBytes });
     layer.placedLayer = {
       id: linkId,
@@ -251,7 +275,7 @@ async function compileLayer(spec: LayerSpec, ctx: CompileContext): Promise<any> 
   return layer;
 }
 
-function compositeOver(base: RgbaImage, entry: CompositeEntry): void {
+function compositeOverOpaque(base: RgbaImage, entry: CompositeEntry): void {
   const { image, left, top, opacity } = entry;
   const startX = Math.max(0, left);
   const startY = Math.max(0, top);
@@ -264,19 +288,19 @@ function compositeOver(base: RgbaImage, entry: CompositeEntry): void {
     for (let x = startX; x < endX; x += 1) {
       const sourceX = x - left;
       const si = (sourceY * image.width + sourceX) * 4;
+      const alpha = (image.data[si + 3] / 255) * opacity;
+      if (alpha <= 0) continue;
       const di = (y * base.width + x) * 4;
-      const sourceAlpha = (image.data[si + 3] / 255) * opacity;
-      if (sourceAlpha <= 0) continue;
-      const destinationAlpha = base.data[di + 3] / 255;
-      const outAlpha = sourceAlpha + destinationAlpha * (1 - sourceAlpha);
-      if (outAlpha <= 0) continue;
-      for (let channel = 0; channel < 3; channel += 1) {
-        const sourceValue = image.data[si + channel] / 255;
-        const destination = base.data[di + channel] / 255;
-        const out = (sourceValue * sourceAlpha + destination * destinationAlpha * (1 - sourceAlpha)) / outAlpha;
-        base.data[di + channel] = Math.round(out * 255);
+      if (alpha >= 1) {
+        base.data[di] = image.data[si];
+        base.data[di + 1] = image.data[si + 1];
+        base.data[di + 2] = image.data[si + 2];
+      } else {
+        const inverse = 1 - alpha;
+        base.data[di] = Math.round(image.data[si] * alpha + base.data[di] * inverse);
+        base.data[di + 1] = Math.round(image.data[si + 1] * alpha + base.data[di + 1] * inverse);
+        base.data[di + 2] = Math.round(image.data[si + 2] * alpha + base.data[di + 2] * inverse);
       }
-      base.data[di + 3] = Math.round(outAlpha * 255);
     }
   }
 }
@@ -284,7 +308,7 @@ function compositeOver(base: RgbaImage, entry: CompositeEntry): void {
 function buildComposite(manifest: MockupManifest, entries: CompositeEntry[]): RgbaImage {
   const { width, height, background = '#ffffff' } = manifest.document;
   const base = solidRgba(width, height, background, 255);
-  for (const entry of [...entries].reverse()) compositeOver(base, entry);
+  for (let index = entries.length - 1; index >= 0; index -= 1) compositeOverOpaque(base, entries[index]);
   return base;
 }
 
@@ -292,17 +316,28 @@ export async function buildMockup(input: unknown, options: BuildOptions): Promis
   const manifest = mockupManifestSchema.parse(input) as MockupManifest;
   const cwd = options.cwd ?? process.cwd();
   const output = path.resolve(cwd, options.output);
+  const pixels = manifest.document.width * manifest.document.height;
+  const requestedComposite = options.generateComposite !== false;
+  const collectComposite = requestedComposite && pixels <= 80_000_000;
+  const warnings: string[] = [];
+  if (requestedComposite && !collectComposite) {
+    warnings.push('Composite preview skipped because the document exceeds 80 megapixels. Editable layers are still written.');
+  }
+
   const ctx: CompileContext = {
     cwd,
     dpi: manifest.document.dpi ?? 72,
     linkedFiles: [],
     smartObjectCount: 0,
     layerCount: 0,
-    warnings: [],
+    warnings,
     compositeEntries: [],
+    collectComposite,
     warnedCompositeClipping: false,
     warnedCompositeEffects: false,
     warnedVectorFeather: false,
+    metadataCache: new Map(),
+    sourceBytesCache: new Map(),
   };
 
   const children = [];
@@ -325,12 +360,7 @@ export async function buildMockup(input: unknown, options: BuildOptions): Promis
     },
   };
 
-  const pixels = manifest.document.width * manifest.document.height;
-  if (options.generateComposite !== false && pixels <= 80_000_000) {
-    psd.imageData = buildComposite(manifest, ctx.compositeEntries);
-  } else if (options.generateComposite !== false) {
-    ctx.warnings.push('Composite preview skipped because the document exceeds 80 megapixels. Editable layers are still written.');
-  }
+  if (collectComposite) psd.imageData = buildComposite(manifest, ctx.compositeEntries);
 
   const buffer = writePsdBuffer(psd, {
     generateThumbnail: false,
@@ -344,11 +374,16 @@ export async function buildMockup(input: unknown, options: BuildOptions): Promis
   return { output, bytes: buffer.byteLength, layerCount: ctx.layerCount, smartObjectCount: ctx.smartObjectCount, warnings: ctx.warnings };
 }
 
-export async function buildMockupFile(manifestFile: string, output: string): Promise<BuildResult> {
+export async function buildMockupFile(
+  manifestFile: string,
+  output: string,
+  options: Pick<BuildOptions, 'generateComposite'> = {},
+): Promise<BuildResult> {
   const absoluteManifest = path.resolve(manifestFile);
   const source = JSON.parse(await readFile(absoluteManifest, 'utf8'));
   return buildMockup(source, {
     output: path.resolve(output),
     cwd: path.dirname(absoluteManifest),
+    generateComposite: options.generateComposite,
   });
 }
