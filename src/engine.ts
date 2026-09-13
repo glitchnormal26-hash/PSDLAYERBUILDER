@@ -82,7 +82,7 @@ async function compileMask(spec: LayerMaskSpec, layerLeft: number, layerTop: num
   const image = grayscaleMask(await readRgba(source, maskWidth, maskHeight), spec.invert ?? false);
   const left = Math.round(spec.x ?? layerLeft);
   const top = Math.round(spec.y ?? layerTop);
-  const defaultColor = spec.defaultColor ?? 0;
+  const defaultColor: 0 | 255 = spec.defaultColor ?? 0;
 
   return {
     image,
