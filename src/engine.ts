@@ -112,7 +112,7 @@ function applyMaskForComposite(source: RgbaImage, layerLeft: number, layerTop: n
       const docX = layerLeft + x;
       const mx = docX - mask.left;
       const my = docY - mask.top;
-      let value = mask.defaultColor;
+      let value: number = mask.defaultColor;
       if (mx >= 0 && my >= 0 && mx < mask.image.width && my < mask.image.height) {
         value = mask.image.data[(my * mask.image.width + mx) * 4];
       }
