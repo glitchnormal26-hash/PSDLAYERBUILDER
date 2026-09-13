@@ -1,6 +1,6 @@
 {
   "name": "psdlayerbuilder",
-  "version": "1.3.1",
+  "version": "1.4.0",
   "private": true,
   "description": "Production-grade manifest-driven engine for generating and modifying editable layered Photoshop PSD mockups.",
   "type": "module",
@@ -16,7 +16,8 @@
     }
   },
   "bin": {
-    "psdlayer": "dist/cli.js"
+    "psdlayer": "dist/cli.js",
+    "psdlayer-rebuild": "dist/rebuild-cli.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -24,6 +25,7 @@
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "check:uxp": "node --check uxp-finalizer/main.js",
+    "magnific:rebuild": "node dist/rebuild-cli.js",
     "example:assets": "node scripts/generate-example-assets.mjs",
     "example": "npm run example:assets && npm run build && node dist/cli.js build examples/basic.mockup.json -o examples/output/basic-mockup.psd"
   },
