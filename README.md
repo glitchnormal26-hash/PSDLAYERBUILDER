@@ -1,17 +1,19 @@
 # PSDLAYERBUILDER
 
-Manifest-driven engine for generating Photoshop PSD mockups with a clean, editable layer tree.
+Manifest-driven engine for generating and modifying Photoshop PSD mockups with a clean, editable layer tree.
 
-## What it builds
+## Core capabilities
 
 - Nested Photoshop groups
 - Raster layers with position, size, opacity, visibility and common blend modes
-- Embedded smart-object layers with the original source file stored in the PSD
+- Embedded smart objects with the original source stored inside the PSD
+- **Perspective smart objects** using an 8-point document-space quad, including a generated perspective raster cache
+- **Template replacement**: replace a named smart object inside an existing PSD while preserving the rest of the template
 - Editable text metadata
-- Composite preview for apps that do not render PSD layers themselves
-- A CLI to build and inspect PSD files
+- Composite preview for generated PSDs
+- CLI commands to build, replace and inspect PSD files
 
-The portable writer uses `ag-psd` 31.0.2. The project intentionally keeps its own manifest model separate from the PSD library so another backend (Photoshop UXP, Rust, cloud worker) can be added later without changing mockup definitions.
+The portable writer uses `ag-psd` 31.0.2. The manifest model is kept separate from the PSD backend so a Photoshop UXP, Rust or cloud backend can be added later without changing mockup definitions.
 
 ## Quick start
 
@@ -20,28 +22,33 @@ npm install
 npm run example
 ```
 
-The example PSD is written to:
+The example PSD is written to `examples/output/basic-mockup.psd`.
 
-```text
-examples/output/basic-mockup.psd
-```
-
-Build your own manifest:
+### Build from a manifest
 
 ```bash
 npm run build
 node dist/cli.js build path/to/mockup.json -o output/mockup.psd
 ```
 
-Inspect a PSD layer tree:
+### Replace a smart object in an existing template
 
 ```bash
-node dist/cli.js inspect output/mockup.psd
+node dist/cli.js replace template.psd \
+  --layer "YOUR DESIGN" \
+  --artwork artwork.png \
+  -o output/final.psd
+```
+
+### Inspect a PSD layer tree
+
+```bash
+node dist/cli.js inspect output/final.psd
 ```
 
 ## Manifest
 
-Layer order is **top to bottom**, matching the Photoshop Layers panel.
+Layer order is **top to bottom**, matching the Photoshop Layers panel. Paths in `source` are relative to the manifest file.
 
 ```json
 {
@@ -57,10 +64,7 @@ Layer order is **top to bottom**, matching the Photoshop Layers panel.
       "type": "smart-object",
       "name": "YOUR DESIGN",
       "source": "assets/design.png",
-      "x": 500,
-      "y": 350,
-      "width": 1000,
-      "height": 700
+      "quad": [420, 330, 1570, 380, 1500, 1100, 500, 1040]
     },
     {
       "type": "raster",
@@ -75,51 +79,62 @@ Layer order is **top to bottom**, matching the Photoshop Layers panel.
 }
 ```
 
-Paths in `source` are resolved relative to the manifest file. HTTP/HTTPS sources are deliberately rejected; download assets before building so a build is deterministic.
+For axis-aligned placement, omit `quad` and use `x`, `y`, `width`, and `height` instead.
+
+## Why there are two workflows
+
+### 1. Build from scratch
+
+Use JSON when the mockup is programmatically defined. The engine creates groups, raster layers, text metadata and embedded smart objects. Perspective artwork is rasterized into the layer cache with a projective transform while the source remains embedded and editable.
+
+### 2. Replace inside a Photoshop-made template
+
+Use `replace` when the visual mockup already exists in Photoshop and contains lighting, masks, effects, displacement or other authored details. PSDLAYERBUILDER finds the named smart object, replaces its embedded source, refreshes the projective cache, and writes a new PSD without flattening the template.
+
+This is the preferred production workflow for high-fidelity product mockups because Photoshop-authored effects stay in the source template.
 
 ## Architecture
 
 ```text
-mockup.json
-    │
-    ▼
-Zod validation
-    │
-    ▼
-Layer compiler ────────┬─ raster cache / preview
-    │                  └─ embedded smart-object source
-    ▼
-ag-psd document model
-    │
-    ├─ editable layer tree
-    ├─ linkedFiles
-    └─ composite preview
-    │
-    ▼
-output.psd
+                    ┌──────── build ──────── mockup.json
+                    │                          │
+artwork.png ────────┤                    Zod validation
+                    │                          │
+                    │                    layer compiler
+                    │                          │
+                    │                 perspective rasterizer
+                    │                          │
+                    │                    ag-psd writer
+                    │                          │
+                    └──────── replace ─── template.psd
+                                               │
+                                        named smart object
+                                               │
+                                      embedded source swap
+                                               │
+                                        ag-psd writer
+                                               │
+                                               ▼
+                                           output.psd
 ```
-
-The manifest is the stable API. `src/engine.ts` is the current portable backend; `src/types.ts` is intentionally backend-neutral.
 
 ## Smart objects
 
-For a `smart-object` layer, PSDLAYERBUILDER writes both:
+Each generated smart-object layer contains both a cached raster and the original artwork bytes via PSD linked-file metadata. The `placedLayer.transform` stores the placement quad, so the layer remains a smart object instead of becoming a permanently flattened raster.
 
-1. a raster preview/cached layer image; and
-2. the original source bytes in the PSD linked-file structure with `placedLayer` metadata.
-
-This gives Photoshop an editable embedded source while keeping a useful preview in readers that only understand raster layer data.
+The built-in perspective rasterizer uses inverse projective mapping and bilinear RGBA sampling. This gives non-Photoshop readers a meaningful cache while Photoshop still receives the embedded source and placement metadata.
 
 ## Text layers
 
-Text is written as editable Photoshop text metadata and the writer asks Photoshop to invalidate/re-render text layers. `ag-psd` still has incomplete text-layer generation, so Photoshop can display a refresh/update prompt on first open. For production typography where exact first-open rendering is mandatory, a future Photoshop UXP backend should perform the final text render.
+Text is written as editable Photoshop text metadata and the writer asks Photoshop to re-render it. `ag-psd` text-layer generation is not complete, so Photoshop can show a refresh/update prompt on first open. For pixel-perfect automated typography, a later Photoshop UXP backend can perform the final render.
 
 ## Current boundaries
 
-- Portable output is RGB PSD; PSB and non-RGB authoring are not part of the current backend.
-- The current smart-object preview is axis-aligned. Perspective/warp metadata and Photoshop-quality raster cache generation are planned separately.
-- The composite is a convenience preview; it currently flattens image-backed layers with normal alpha compositing and does not attempt to reproduce every Photoshop blend/effect.
-- PSD is limited to 30,000 × 30,000 and the manifest adds a 300 MP safety cap to avoid accidental memory exhaustion.
+- Portable authoring is RGB PSD, not PSB.
+- A Photoshop `warp` beyond the 4-corner projective transform is preserved by the template workflow, but the portable cache only renders the projective part; Photoshop should perform the final warp render.
+- Generated composite previews use normal alpha compositing. Layer blend modes/effects remain stored on layers but are not fully reproduced in the flattened convenience preview.
+- PSD dimensions are capped at 30,000 × 30,000 and the manifest has a 300 MP guard. Composite and perspective cache generation have an 80 MP memory guard.
+- Remote asset URLs are rejected to keep builds deterministic.
 
 ## Development
 
@@ -129,15 +144,15 @@ npm test
 npm run build
 ```
 
-CI runs those checks on every push and pull request.
+CI runs those checks on pushes and pull requests.
 
 ## Roadmap
 
-1. Perspective quad / warp smart objects
-2. Masks and clipping-mask manifest syntax
-3. Layer effects (shadow, stroke, overlays)
-4. Photoshop UXP finalizer for pixel-perfect text and smart-object cache regeneration
-5. PSD-template import + named placeholder replacement
+1. Raster/vector masks and clipping-mask manifest syntax
+2. Layer effects (drop shadow, stroke, overlays)
+3. Displacement-map preview backend
+4. Photoshop UXP finalizer for native warp/text cache regeneration
+5. Multiple named slot replacement in one command
 6. Optional PSB backend for very large documents
 
 ## License

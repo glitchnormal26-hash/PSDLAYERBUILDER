@@ -12,6 +12,8 @@ export type BlendMode =
   | 'difference'
   | 'exclusion';
 
+export type Quad = [number, number, number, number, number, number, number, number];
+
 export interface BaseLayerSpec {
   name: string;
   visible?: boolean;
@@ -42,6 +44,8 @@ export interface SmartObjectLayerSpec extends BaseLayerSpec {
   width?: number;
   height?: number;
   dpi?: number;
+  /** Absolute document coordinates: TL, TR, BR, BL. Overrides x/y/width/height. */
+  quad?: Quad;
 }
 
 export interface TextLayerSpec extends BaseLayerSpec {
@@ -78,5 +82,19 @@ export interface BuildResult {
   bytes: number;
   layerCount: number;
   smartObjectCount: number;
+  warnings: string[];
+}
+
+export interface ReplaceSmartObjectOptions {
+  template: string;
+  layerName: string;
+  artwork: string;
+  output: string;
+}
+
+export interface ReplaceSmartObjectResult {
+  output: string;
+  bytes: number;
+  layerName: string;
   warnings: string[];
 }

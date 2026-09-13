@@ -22,6 +22,11 @@ const rasterLayer = z.object({
   height: z.number().int().positive().optional(),
 });
 
+const quad = z.tuple([
+  z.number().finite(), z.number().finite(), z.number().finite(), z.number().finite(),
+  z.number().finite(), z.number().finite(), z.number().finite(), z.number().finite(),
+]);
+
 const smartObjectLayer = z.object({
   ...baseLayer,
   type: z.literal('smart-object'),
@@ -31,6 +36,7 @@ const smartObjectLayer = z.object({
   width: z.number().int().positive().optional(),
   height: z.number().int().positive().optional(),
   dpi: z.number().positive().max(2400).optional(),
+  quad: quad.optional(),
 });
 
 const textLayer = z.object({
@@ -44,8 +50,8 @@ const textLayer = z.object({
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
 });
 
-type AnyLayerSchema = z.ZodTypeAny;
-const layerSchema: AnyLayerSchema = z.lazy(() => z.discriminatedUnion('type', [
+let layerSchema: any;
+layerSchema = z.lazy(() => z.discriminatedUnion('type', [
   rasterLayer,
   smartObjectLayer,
   textLayer,

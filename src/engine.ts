@@ -3,8 +3,9 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { writePsdBuffer } from 'ag-psd';
 import { readRgba, imageMetadata, parseHexColor, solidRgba, type RgbaImage } from './image.js';
+import { warpPerspective } from './perspective.js';
 import { mockupManifestSchema } from './schema.js';
-import type { BuildOptions, BuildResult, LayerSpec, MockupManifest } from './types.js';
+import type { BuildOptions, BuildResult, LayerSpec, MockupManifest, Quad } from './types.js';
 
 interface CompileContext {
   cwd: string;
@@ -43,11 +44,7 @@ async function compileLayer(spec: LayerSpec, ctx: CompileContext): Promise<any> 
   if (spec.type === 'group') {
     const children = [];
     for (const child of spec.children) children.push(await compileLayer(child, ctx));
-    return {
-      ...commonLayer(spec),
-      opened: spec.opened ?? true,
-      children,
-    };
+    return { ...commonLayer(spec), opened: spec.opened ?? true, children };
   }
 
   if (spec.type === 'text') {
@@ -58,26 +55,42 @@ async function compileLayer(spec: LayerSpec, ctx: CompileContext): Promise<any> 
       text: {
         text: spec.text,
         transform: [1, 0, 0, 1, spec.x, spec.y],
-        style: {
-          font: { name: spec.font ?? 'ArialMT' },
-          fontSize: spec.size ?? 48,
-          fillColor: color,
-        },
+        style: { font: { name: spec.font ?? 'ArialMT' }, fontSize: spec.size ?? 48, fillColor: color },
       },
     };
   }
 
   const source = resolveSource(ctx.cwd, spec.source);
-  const x = Math.round(spec.x ?? 0);
-  const y = Math.round(spec.y ?? 0);
   const original = await imageMetadata(source);
-  const targetWidth = Math.round(spec.width ?? original.width);
-  const targetHeight = Math.round(spec.height ?? original.height);
-  const preview = await readRgba(source, targetWidth, targetHeight);
+  let preview: RgbaImage;
+  let x: number;
+  let y: number;
+  let placedTransform: Quad | undefined;
 
-  if (spec.visible !== false) {
-    ctx.compositeEntries.push({ image: preview, left: x, top: y, opacity: spec.opacity ?? 1 });
+  if (spec.type === 'smart-object' && spec.quad) {
+    const sourceImage = await readRgba(source);
+    const warped = warpPerspective(sourceImage, spec.quad);
+    preview = warped.image;
+    x = warped.left;
+    y = warped.top;
+    placedTransform = spec.quad;
+  } else {
+    x = Math.round(spec.x ?? 0);
+    y = Math.round(spec.y ?? 0);
+    const targetWidth = Math.round(spec.width ?? original.width);
+    const targetHeight = Math.round(spec.height ?? original.height);
+    preview = await readRgba(source, targetWidth, targetHeight);
+    if (spec.type === 'smart-object') {
+      placedTransform = [
+        x, y,
+        x + preview.width, y,
+        x + preview.width, y + preview.height,
+        x, y + preview.height,
+      ];
+    }
   }
+
+  if (spec.visible !== false) ctx.compositeEntries.push({ image: preview, left: x, top: y, opacity: spec.opacity ?? 1 });
 
   const layer: any = {
     ...commonLayer(spec),
@@ -98,12 +111,7 @@ async function compileLayer(spec: LayerSpec, ctx: CompileContext): Promise<any> 
       id: linkId,
       placed: placedId,
       type: 'raster',
-      transform: [
-        x, y,
-        x + targetWidth, y,
-        x + targetWidth, y + targetHeight,
-        x, y + targetHeight,
-      ],
+      transform: placedTransform,
       width: original.width,
       height: original.height,
       resolution: { value: spec.dpi ?? ctx.dpi, units: 'Density' },
@@ -132,7 +140,6 @@ function compositeOver(base: RgbaImage, entry: CompositeEntry): void {
       const destinationAlpha = base.data[di + 3] / 255;
       const outAlpha = sourceAlpha + destinationAlpha * (1 - sourceAlpha);
       if (outAlpha <= 0) continue;
-
       for (let channel = 0; channel < 3; channel += 1) {
         const source = image.data[si + channel] / 255;
         const destination = base.data[di + channel] / 255;
@@ -198,17 +205,10 @@ export async function buildMockup(input: unknown, options: BuildOptions): Promis
     invalidateTextLayers: true,
     logMissingFeatures: true,
   });
-
   await mkdir(path.dirname(output), { recursive: true });
   await writeFile(output, buffer);
 
-  return {
-    output,
-    bytes: buffer.byteLength,
-    layerCount: ctx.layerCount,
-    smartObjectCount: ctx.smartObjectCount,
-    warnings: ctx.warnings,
-  };
+  return { output, bytes: buffer.byteLength, layerCount: ctx.layerCount, smartObjectCount: ctx.smartObjectCount, warnings: ctx.warnings };
 }
 
 export async function buildMockupFile(manifestFile: string, output: string): Promise<BuildResult> {
