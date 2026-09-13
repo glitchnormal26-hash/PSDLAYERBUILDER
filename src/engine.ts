@@ -7,6 +7,7 @@ import { compileEffects } from './effects.js';
 import { readRgba, imageMetadata, parseHexColor, solidRgba, type RgbaImage } from './image.js';
 import { warpPerspective } from './perspective.js';
 import { mockupManifestSchema } from './schema.js';
+import { applyVectorMaskForComposite, compileVectorMask } from './vector-mask.js';
 import type { BuildOptions, BuildResult, LayerMaskSpec, LayerSpec, MockupManifest, Quad } from './types.js';
 
 interface CompileContext {
@@ -19,6 +20,7 @@ interface CompileContext {
   compositeEntries: CompositeEntry[];
   warnedCompositeClipping: boolean;
   warnedCompositeEffects: boolean;
+  warnedVectorFeather: boolean;
 }
 
 interface CompositeEntry {
@@ -190,8 +192,33 @@ async function compileLayer(spec: LayerSpec, ctx: CompileContext): Promise<any> 
   }
 
   const mask = spec.mask ? await compileMask(spec.mask, x, y, preview.width, preview.height, ctx) : undefined;
-  const compositePreview = mask ? applyMaskForComposite(preview, x, y, mask) : preview;
+  const vectorMask = spec.vectorMask ? compileVectorMask(spec.vectorMask) : undefined;
+  let compositePreview = mask ? applyMaskForComposite(preview, x, y, mask) : preview;
+  if (spec.vectorMask) {
+    compositePreview = applyVectorMaskForComposite(compositePreview, x, y, spec.vectorMask);
+    if ((spec.vectorMask.feather ?? 0) > 0 && !ctx.warnedVectorFeather) {
+      ctx.warnings.push('Vector-mask feather is stored natively in the PSD; the convenience composite preview uses a hard vector edge.');
+      ctx.warnedVectorFeather = true;
+    }
+  }
   if (spec.visible !== false) ctx.compositeEntries.push({ image: compositePreview, left: x, top: y, opacity: spec.opacity ?? 1 });
+
+  let nativeMask = mask?.native;
+  if (spec.vectorMask) {
+    if (!nativeMask) {
+      nativeMask = {
+        top: y,
+        left: x,
+        bottom: y + preview.height,
+        right: x + preview.width,
+        defaultColor: 0,
+        disabled: false,
+        positionRelativeToLayer: false,
+        fromVectorData: true,
+      };
+    }
+    nativeMask.vectorMaskFeather = spec.vectorMask.feather ?? 0;
+  }
 
   const layer: any = {
     ...commonLayer(spec, ctx),
@@ -200,7 +227,8 @@ async function compileLayer(spec: LayerSpec, ctx: CompileContext): Promise<any> 
     bottom: y + preview.height,
     right: x + preview.width,
     imageData: preview,
-    ...(mask ? { mask: mask.native } : {}),
+    ...(nativeMask ? { mask: nativeMask } : {}),
+    ...(vectorMask ? { vectorMask } : {}),
   };
 
   if (spec.type === 'smart-object') {
@@ -243,9 +271,9 @@ function compositeOver(base: RgbaImage, entry: CompositeEntry): void {
       const outAlpha = sourceAlpha + destinationAlpha * (1 - sourceAlpha);
       if (outAlpha <= 0) continue;
       for (let channel = 0; channel < 3; channel += 1) {
-        const source = image.data[si + channel] / 255;
+        const sourceValue = image.data[si + channel] / 255;
         const destination = base.data[di + channel] / 255;
-        const out = (source * sourceAlpha + destination * destinationAlpha * (1 - sourceAlpha)) / outAlpha;
+        const out = (sourceValue * sourceAlpha + destination * destinationAlpha * (1 - sourceAlpha)) / outAlpha;
         base.data[di + channel] = Math.round(out * 255);
       }
       base.data[di + 3] = Math.round(outAlpha * 255);
@@ -274,6 +302,7 @@ export async function buildMockup(input: unknown, options: BuildOptions): Promis
     compositeEntries: [],
     warnedCompositeClipping: false,
     warnedCompositeEffects: false,
+    warnedVectorFeather: false,
   };
 
   const children = [];

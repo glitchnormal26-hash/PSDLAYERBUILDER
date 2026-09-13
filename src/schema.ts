@@ -54,6 +54,22 @@ const mask = z.object({
   defaultColor: z.union([z.literal(0), z.literal(255)]).optional(),
 });
 
+const vectorMaskPath = z.object({
+  points: z.array(z.tuple([z.number().finite(), z.number().finite()])).min(3).max(2000),
+  operation: z.enum(['combine', 'subtract', 'intersect', 'exclude']).optional(),
+  closed: z.boolean().optional(),
+});
+
+const vectorMask = z.object({
+  paths: z.array(vectorMaskPath).min(1).max(128),
+  invert: z.boolean().optional(),
+  linked: z.boolean().optional(),
+  feather: z.number().finite().min(0).max(10000).optional(),
+  fillStartsWithAllPixels: z.boolean().optional(),
+}).refine((value) => value.paths.reduce((sum, path) => sum + path.points.length, 0) <= 20000, {
+  message: 'Vector mask exceeds the 20,000 point safety limit',
+});
+
 const displacement = z.object({
   source: z.string().min(1),
   scaleX: z.number().finite().min(-4096).max(4096).optional(),
@@ -71,6 +87,7 @@ const rasterLayer = z.object({
   width: z.number().int().positive().optional(),
   height: z.number().int().positive().optional(),
   mask: mask.optional(),
+  vectorMask: vectorMask.optional(),
   displacement: displacement.optional(),
 });
 
@@ -90,6 +107,7 @@ const smartObjectLayer = z.object({
   dpi: z.number().positive().max(2400).optional(),
   quad: quad.optional(),
   mask: mask.optional(),
+  vectorMask: vectorMask.optional(),
   displacement: displacement.optional(),
 });
 
@@ -128,4 +146,16 @@ export const mockupManifestSchema = z.object({
     message: 'Document exceeds the 300 megapixel safety limit',
   }),
   layers: z.array(layerSchema).max(10000),
+});
+
+const replacementEntry = z.object({
+  layer: z.string().min(1).optional(),
+  path: z.array(z.string().min(1)).min(1).max(64).optional(),
+  artwork: z.string().min(1),
+}).refine((entry) => Number(Boolean(entry.layer)) + Number(Boolean(entry.path)) === 1, {
+  message: 'Each replacement must specify exactly one of layer or path',
+});
+
+export const replacementMapSchema = z.object({
+  replacements: z.array(replacementEntry).min(1).max(1000),
 });

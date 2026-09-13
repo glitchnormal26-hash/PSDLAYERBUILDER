@@ -1,15 +1,16 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
 import { ZodError } from 'zod';
+import { doctorPsd } from './doctor.js';
 import { buildMockupFile } from './engine.js';
 import { inspectPsd } from './inspect.js';
-import { replaceSmartObject } from './template.js';
+import { replaceSmartObjects, replaceSmartObjectsFromMap } from './template.js';
 
 const program = new Command();
 program
   .name('psdlayer')
-  .description('Build and modify editable layered PSD mockups')
-  .version('0.3.0');
+  .description('Build, validate and modify editable layered PSD mockups')
+  .version('1.0.0');
 
 program.command('build')
   .argument('<manifest>', 'Path to mockup manifest JSON')
@@ -27,19 +28,44 @@ program.command('build')
 
 program.command('replace')
   .argument('<template>', 'PSD template file')
-  .requiredOption('--layer <name>', 'Exact smart-object layer name')
+  .option('--layer <name>', 'Unique smart-object layer name')
+  .option('--path <path>', 'Exact slash-separated smart-object layer path')
   .requiredOption('--artwork <file>', 'Replacement PNG/JPEG/WebP artwork')
   .requiredOption('-o, --output <file>', 'Output PSD file')
   .action(async (template, options) => {
     try {
-      const result = await replaceSmartObject({
+      if (Number(Boolean(options.layer)) + Number(Boolean(options.path)) !== 1) {
+        throw new Error('Specify exactly one of --layer or --path');
+      }
+      const selector = options.path
+        ? { path: String(options.path).split('/').filter(Boolean) }
+        : { name: String(options.layer) };
+      const result = await replaceSmartObjects({
         template,
-        layerName: options.layer,
-        artwork: options.artwork,
+        replacements: [{ selector, artwork: options.artwork }],
         output: options.output,
       });
       console.log(`PSD written: ${result.output}`);
-      console.log(`Replaced smart object: ${result.layerName} | Bytes: ${result.bytes}`);
+      for (const replacement of result.replacements) {
+        console.log(`Replaced: ${replacement.layerPath} -> ${replacement.artwork}`);
+        if (replacement.affectedLayerPaths.length > 1) console.log(`Shared instances refreshed: ${replacement.affectedLayerPaths.join(', ')}`);
+      }
+      for (const warning of result.warnings) console.warn(`Warning: ${warning}`);
+    } catch (error) {
+      reportError(error);
+    }
+  });
+
+program.command('replace-many')
+  .argument('<template>', 'PSD template file')
+  .requiredOption('--map <json>', 'Replacement map JSON file')
+  .requiredOption('-o, --output <file>', 'Output PSD file')
+  .action(async (template, options) => {
+    try {
+      const result = await replaceSmartObjectsFromMap(template, options.map, options.output);
+      console.log(`PSD written: ${result.output}`);
+      console.log(`Replacements: ${result.replacements.length} | Bytes: ${result.bytes}`);
+      for (const replacement of result.replacements) console.log(`- ${replacement.layerPath} -> ${replacement.artwork}`);
       for (const warning of result.warnings) console.warn(`Warning: ${warning}`);
     } catch (error) {
       reportError(error);
@@ -50,8 +76,21 @@ program.command('inspect')
   .argument('<psd>', 'PSD file to inspect')
   .action(async (psdFile) => {
     try {
-      const result = await inspectPsd(psdFile);
+      console.log(JSON.stringify(await inspectPsd(psdFile), null, 2));
+    } catch (error) {
+      reportError(error);
+    }
+  });
+
+program.command('doctor')
+  .argument('<psd>', 'PSD file to validate structurally')
+  .option('--strict', 'Treat warnings as a failing result')
+  .action(async (psdFile, options) => {
+    try {
+      const result = await doctorPsd(psdFile);
       console.log(JSON.stringify(result, null, 2));
+      const hasWarning = result.diagnostics.some((item) => item.severity === 'warning');
+      if (!result.ok || (options.strict && hasWarning)) process.exitCode = 2;
     } catch (error) {
       reportError(error);
     }
@@ -59,7 +98,7 @@ program.command('inspect')
 
 function reportError(error: unknown): void {
   if (error instanceof ZodError) {
-    console.error('Invalid manifest:');
+    console.error('Invalid input:');
     for (const issue of error.issues) console.error(`- ${issue.path.join('.')}: ${issue.message}`);
   } else {
     console.error(error instanceof Error ? error.message : String(error));

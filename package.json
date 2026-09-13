@@ -1,11 +1,19 @@
 {
   "name": "psdlayerbuilder",
-  "version": "0.3.0",
+  "version": "1.0.0",
   "private": true,
-  "description": "Manifest-driven engine for generating editable layered PSD mockups.",
+  "description": "Production-grade manifest-driven engine for generating and modifying editable layered Photoshop PSD mockups.",
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": ">=20.9.0"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
   },
   "bin": {
     "psdlayer": "dist/cli.js"
@@ -15,19 +23,20 @@
     "dev": "tsx src/cli.ts",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "check:uxp": "node --check uxp-finalizer/main.js",
     "example:assets": "node scripts/generate-example-assets.mjs",
     "example": "npm run example:assets && npm run build && node dist/cli.js build examples/basic.mockup.json -o examples/output/basic-mockup.psd"
   },
   "dependencies": {
     "ag-psd": "31.0.2",
-    "commander": "^14.0.0",
-    "sharp": "^0.34.3",
-    "zod": "^4.1.5"
+    "commander": "^14.0.3",
+    "sharp": "^0.35.4",
+    "zod": "^4.6.2"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",
-    "tsx": "^4.20.5",
+    "tsx": "^4.23.13",
     "typescript": "^5.9.2",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.7"
   }
 }

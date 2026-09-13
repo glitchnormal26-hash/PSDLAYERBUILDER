@@ -13,6 +13,8 @@ export type BlendMode =
   | 'exclusion';
 
 export type Quad = [number, number, number, number, number, number, number, number];
+export type Point = [number, number];
+export type VectorBooleanOperation = 'combine' | 'subtract' | 'intersect' | 'exclude';
 
 export interface DropShadowEffectSpec {
   color?: string;
@@ -56,6 +58,20 @@ export interface LayerMaskSpec {
   defaultColor?: 0 | 255;
 }
 
+export interface VectorMaskPathSpec {
+  points: Point[];
+  operation?: VectorBooleanOperation;
+  closed?: boolean;
+}
+
+export interface VectorMaskSpec {
+  paths: VectorMaskPathSpec[];
+  invert?: boolean;
+  linked?: boolean;
+  feather?: number;
+  fillStartsWithAllPixels?: boolean;
+}
+
 export interface DisplacementSpec {
   source: string;
   scaleX?: number;
@@ -87,6 +103,7 @@ export interface RasterLayerSpec extends BaseLayerSpec {
   width?: number;
   height?: number;
   mask?: LayerMaskSpec;
+  vectorMask?: VectorMaskSpec;
   displacement?: DisplacementSpec;
 }
 
@@ -101,6 +118,7 @@ export interface SmartObjectLayerSpec extends BaseLayerSpec {
   /** Absolute document coordinates: TL, TR, BR, BL. Overrides x/y/width/height. */
   quad?: Quad;
   mask?: LayerMaskSpec;
+  vectorMask?: VectorMaskSpec;
   displacement?: DisplacementSpec;
 }
 
@@ -141,6 +159,26 @@ export interface BuildResult {
   warnings: string[];
 }
 
+export interface SmartObjectSelector {
+  name?: string;
+  path?: string[];
+}
+
+export interface SmartObjectReplacement {
+  selector: SmartObjectSelector;
+  artwork: string;
+}
+
+export interface ReplacementMapEntry {
+  layer?: string;
+  path?: string[];
+  artwork: string;
+}
+
+export interface ReplacementMap {
+  replacements: ReplacementMapEntry[];
+}
+
 export interface ReplaceSmartObjectOptions {
   template: string;
   layerName: string;
@@ -153,4 +191,50 @@ export interface ReplaceSmartObjectResult {
   bytes: number;
   layerName: string;
   warnings: string[];
+}
+
+export interface ReplaceSmartObjectsOptions {
+  template: string;
+  replacements: SmartObjectReplacement[];
+  output: string;
+  cwd?: string;
+}
+
+export interface AppliedReplacement {
+  layerPath: string;
+  artwork: string;
+  linkedFileId: string;
+  affectedLayerPaths: string[];
+}
+
+export interface ReplaceSmartObjectsResult {
+  output: string;
+  bytes: number;
+  replacements: AppliedReplacement[];
+  warnings: string[];
+}
+
+export type DiagnosticSeverity = 'error' | 'warning' | 'info';
+
+export interface PsdDiagnostic {
+  severity: DiagnosticSeverity;
+  code: string;
+  message: string;
+  layerPath?: string;
+}
+
+export interface PsdDoctorResult {
+  ok: boolean;
+  width: number;
+  height: number;
+  stats: {
+    layers: number;
+    groups: number;
+    smartObjects: number;
+    textLayers: number;
+    masks: number;
+    vectorMasks: number;
+    linkedFiles: number;
+  };
+  diagnostics: PsdDiagnostic[];
 }
