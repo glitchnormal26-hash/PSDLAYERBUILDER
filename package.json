@@ -1,0 +1,33 @@
+{
+  "name": "psdlayerbuilder",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Manifest-driven engine for generating editable layered PSD mockups.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "psdlayer": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/cli.ts",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "example:assets": "node scripts/generate-example-assets.mjs",
+    "example": "npm run example:assets && npm run build && node dist/cli.js build examples/basic.mockup.json -o examples/output/basic-mockup.psd"
+  },
+  "dependencies": {
+    "ag-psd": "31.0.2",
+    "commander": "^14.0.0",
+    "sharp": "^0.34.3",
+    "zod": "^4.1.5"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}

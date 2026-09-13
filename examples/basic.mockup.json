@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "document": {
+    "width": 1600,
+    "height": 1200,
+    "dpi": 144,
+    "background": "#efefef"
+  },
+  "layers": [
+    {
+      "type": "text",
+      "name": "TITLE — editable text",
+      "text": "PSD LAYER BUILDER",
+      "x": 120,
+      "y": 125,
+      "font": "Arial-BoldMT",
+      "size": 72,
+      "color": "#202020"
+    },
+    {
+      "type": "group",
+      "name": "MOCKUP",
+      "opened": true,
+      "children": [
+        {
+          "type": "smart-object",
+          "name": "YOUR DESIGN — smart object",
+          "source": "assets/artwork.png",
+          "x": 430,
+          "y": 310,
+          "width": 740,
+          "height": 520
+        },
+        {
+          "type": "raster",
+          "name": "SHADOW",
+          "source": "assets/shadow.png",
+          "x": 390,
+          "y": 790,
+          "width": 820,
+          "height": 150,
+          "opacity": 0.42,
+          "blendMode": "multiply"
+        }
+      ]
+    }
+  ]
+}
