@@ -1,0 +1,31 @@
+{
+  "manifestVersion": 5,
+  "id": "com.glitchnormal.psdlayerbuilder.finalizer",
+  "name": "PSDLAYERBUILDER Finalizer",
+  "version": "1.0.0",
+  "main": "index.html",
+  "host": {
+    "app": "PS",
+    "minVersion": "23.3.0"
+  },
+  "entrypoints": [
+    {
+      "type": "command",
+      "id": "finalizeActiveDocument",
+      "label": {
+        "default": "Finalize PSDLAYERBUILDER Mockup"
+      }
+    },
+    {
+      "type": "panel",
+      "id": "psdlayerFinalizer",
+      "label": {
+        "default": "PSD Layer Finalizer"
+      },
+      "minimumSize": { "width": 260, "height": 180 },
+      "preferredDockedSize": { "width": 300, "height": 240 },
+      "preferredFloatingSize": { "width": 360, "height": 280 },
+      "maximumSize": { "width": 1200, "height": 1200 }
+    }
+  ]
+}

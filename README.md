@@ -1,23 +1,25 @@
 # PSDLAYERBUILDER
 
-Manifest-driven engine for generating and modifying Photoshop PSD mockups with a clean, editable layer tree.
+Production-grade Node/TypeScript engine for creating and modifying editable Photoshop PSD mockups without flattening the layer structure.
 
-## Core capabilities
+## v1.0 capabilities
 
-- Nested Photoshop groups
-- Raster layers with position, size, opacity, visibility and blend modes
-- Embedded smart objects with original source bytes stored inside the PSD
-- Perspective smart objects using an 8-point document-space quad
-- Native bitmap layer masks
-- Native Photoshop clipping-mask flags
-- Native editable layer effects: drop shadow, stroke and color overlay
-- Displacement-map raster-cache preview for fabric, paper and curved-surface mockups
-- Template replacement: replace a named smart object inside an existing PSD while preserving the rest of the template
-- Editable text metadata
-- Composite preview for generated PSDs
-- CLI commands to build, replace and inspect PSD files
+- nested Photoshop groups and raster layers
+- embedded Smart Objects with original source bytes stored in the PSD
+- axis-aligned and 4-corner perspective Smart Object placement
+- deterministic **batch Smart Object replacement** with full layer-path selectors
+- shared Smart Object instance detection and cache refresh
+- native bitmap masks and native polygon vector masks
+- native Photoshop clipping-mask flags
+- editable layer effects: drop shadow, stroke and color overlay
+- displacement-map raster-cache preview
+- editable text metadata
+- PSD `inspect` and structural `doctor` commands
+- atomic template output writes
+- optional Photoshop **UXP finalizer** for native Smart Object rerendering
+- CI on Node 20, 22 and 24 plus production dependency security audit
 
-The portable writer uses `ag-psd` 31.0.2. The manifest model is backend-neutral so a Photoshop UXP, Rust or cloud backend can be added later without changing mockup definitions.
+The portable PSD backend is `ag-psd` 31.0.2. The manifest API is intentionally backend-neutral so native Photoshop or another writer can be added without changing mockup definitions.
 
 ## Quick start
 
@@ -26,16 +28,58 @@ npm install
 npm run example
 ```
 
-The example PSD is written to `examples/output/basic-mockup.psd`.
+The example writes `examples/output/basic-mockup.psd`.
 
-### Build from a manifest
+## Build a PSD from JSON
 
 ```bash
 npm run build
-node dist/cli.js build path/to/mockup.json -o output/mockup.psd
+node dist/cli.js build mockup.json -o output/mockup.psd
 ```
 
-### Replace a smart object in an existing Photoshop template
+Example layer:
+
+```json
+{
+  "type": "smart-object",
+  "name": "YOUR DESIGN",
+  "source": "assets/design.png",
+  "quad": [420, 330, 1570, 380, 1500, 1100, 500, 1040],
+  "mask": {
+    "source": "assets/product-mask.png",
+    "feather": 1.5
+  },
+  "vectorMask": {
+    "feather": 1,
+    "paths": [
+      {
+        "operation": "combine",
+        "points": [[450, 350], [1540, 390], [1470, 1070], [510, 1020]]
+      }
+    ]
+  },
+  "displacement": {
+    "source": "assets/fabric-displacement.png",
+    "scaleX": 8,
+    "scaleY": 5,
+    "channel": "luminance"
+  },
+  "effects": {
+    "stroke": {
+      "size": 2,
+      "position": "inside",
+      "color": "#ffffff",
+      "opacity": 0.7
+    }
+  }
+}
+```
+
+Vector-mask coordinates are document-space pixels. Paths support `combine`, `subtract`, `intersect` and `exclude`. Straight polygon points are written as native PSD Bezier knots; Photoshop can edit the resulting vector mask.
+
+## Replace one Smart Object
+
+For a unique layer name:
 
 ```bash
 node dist/cli.js replace template.psd \
@@ -44,121 +88,99 @@ node dist/cli.js replace template.psd \
   -o output/final.psd
 ```
 
-### Inspect a PSD layer tree
+For large templates with duplicate names, use an exact layer path:
 
 ```bash
-node dist/cli.js inspect output/final.psd
+node dist/cli.js replace template.psd \
+  --path "FRONT/Product/YOUR DESIGN" \
+  --artwork front.png \
+  -o output/final.psd
 ```
 
-## Manifest example
+If `--layer` matches more than one layer, the engine fails rather than silently replacing the wrong Smart Object.
 
-Layer order is top-to-bottom, matching the Photoshop Layers panel. Asset paths are relative to the manifest file.
+## Batch replacement
+
+Create a replacement map:
 
 ```json
 {
-  "version": 1,
-  "document": {
-    "width": 2000,
-    "height": 1500,
-    "dpi": 144,
-    "background": "#f3f3f3"
-  },
-  "layers": [
+  "replacements": [
     {
-      "type": "smart-object",
-      "name": "YOUR DESIGN",
-      "source": "assets/design.png",
-      "quad": [420, 330, 1570, 380, 1500, 1100, 500, 1040],
-      "mask": {
-        "source": "assets/product-mask.png",
-        "feather": 1.5
-      },
-      "displacement": {
-        "source": "assets/fabric-displacement.png",
-        "scaleX": 8,
-        "scaleY": 5,
-        "channel": "luminance"
-      },
-      "effects": {
-        "stroke": {
-          "size": 2,
-          "position": "inside",
-          "color": "#ffffff",
-          "opacity": 0.7
-        }
-      }
+      "path": ["FRONT", "YOUR DESIGN"],
+      "artwork": "assets/front.png"
     },
     {
-      "type": "raster",
-      "name": "LIGHTING",
-      "source": "assets/highlight.png",
-      "x": 420,
-      "y": 330,
-      "blendMode": "screen",
-      "clipping": true
-    },
-    {
-      "type": "raster",
-      "name": "SHADOW",
-      "source": "assets/shadow.png",
-      "x": 450,
-      "y": 1000,
-      "opacity": 0.45,
-      "blendMode": "multiply",
-      "effects": {
-        "dropShadow": {
-          "color": "#000000",
-          "opacity": 0.25,
-          "angle": 120,
-          "distance": 18,
-          "size": 28,
-          "spread": 0
-        }
-      }
+      "path": ["BACK", "YOUR DESIGN"],
+      "artwork": "assets/back.png"
     }
   ]
 }
 ```
 
-For axis-aligned smart-object placement, omit `quad` and use `x`, `y`, `width`, and `height`.
+Then perform every replacement in a single PSD read/write cycle:
 
-## Masks
+```bash
+node dist/cli.js replace-many template.psd \
+  --map replacements.json \
+  -o output/final.psd
+```
 
-`mask.source` can be PNG/JPEG/WebP. RGB is converted to luminance and multiplied by source alpha. White reveals, black hides. `invert`, `feather`, explicit mask bounds and Photoshop `defaultColor` are supported. The mask is written as native PSD user-mask data, while the generated composite preview also applies it.
+Artwork paths inside the map are relative to the map file. The engine preflights all targets and artwork before mutating the PSD, rejects conflicting replacements for a shared embedded source, and refreshes every Smart Object instance that shares the replaced source.
 
-## Clipping masks
+## Inspect and validate
 
-Set `"clipping": true` on a layer to store Photoshop's native clipping flag. Photoshop will clip it to the eligible layer beneath it. The lightweight generated composite does not currently emulate clipping groups; the PSD layer structure remains editable and correct for Photoshop.
+```bash
+node dist/cli.js inspect output/final.psd
+node dist/cli.js doctor output/final.psd
+node dist/cli.js doctor output/final.psd --strict
+```
 
-## Layer effects
+`inspect` reports layer paths and key editable features. `doctor` checks Smart Object/link integrity, unsupported transforms, duplicate paths, shared sources and other structural conditions. Errors make the result unhealthy; `--strict` also treats warnings as a failing CLI result.
 
-Supported manifest effects are `dropShadow`, `stroke`, and `colorOverlay`. They are stored as editable Photoshop layer effects rather than baked pixels. The convenience composite does not render these effects.
+## Photoshop UXP finalizer
 
-## Displacement maps
+The portable writer deliberately does not pretend to reproduce every Photoshop renderer. For custom warp, Smart Filters, exact text rendering and other Photoshop-native caches, load the plugin in `uxp-finalizer/` with Adobe UXP Developer Tool.
 
-`displacement` deforms the raster cache using inverse sampling with bilinear interpolation. A value of 128 is neutral; darker and brighter values shift sampling in opposite directions. Supported channels are `luminance`, `red`, `green`, `blue`, and `alpha`, with `clamp` or `transparent` edge handling.
+The finalizer uses Photoshop's native renderer to open/save Smart Object contents, attempts Update All Modified Content for linked objects, saves the parent PSD, and reports per-layer failures. Its manifest uses v5 and requests no unrestricted filesystem permission.
 
-For smart objects, displacement is intentionally cache-only in the portable backend: the embedded artwork remains editable, but the PSD does not contain a native Photoshop Displace smart filter. For production mockups requiring editable Photoshop smart filters, author the filter in a template and use the `replace` workflow; template metadata is preserved.
+Recommended high-fidelity workflow:
 
-## Production workflows
+```text
+Photoshop-authored template.psd
+          |
+          v
+psdlayer replace-many
+          |
+          v
+portable PSD with updated embedded artwork + projective caches
+          |
+          v
+open in Photoshop -> run PSDLAYERBUILDER Finalizer
+          |
+          v
+Photoshop-native warp/filter/text caches -> delivery PSD
+```
 
-### Build from scratch
+## Native vs preview behavior
 
-Use JSON when the mockup is programmatically defined. The engine creates groups, raster layers, editable metadata, masks, effects and embedded smart objects.
+Bitmap masks, vector masks, clipping flags and supported layer effects are stored as editable PSD metadata. The convenience composite generated by the portable builder applies bitmap masks and hard-edged vector polygons, but it does not attempt to emulate all Photoshop blend/effect/clipping behavior. Vector feather is preserved natively but not blurred in the lightweight composite.
 
-### Replace inside a Photoshop-authored template
+For Smart Objects, displacement is cache-only in the portable backend. The embedded source remains editable. If the production template uses Photoshop Displace or another Smart Filter, author that filter in Photoshop and use template replacement + UXP finalization.
 
-Use `replace` when the visual mockup already exists in Photoshop and contains advanced lighting, masks, effects, smart filters, displacement, warp or other authored details. PSDLAYERBUILDER replaces the named embedded artwork and preserves the template structure through raw PSD channel round-tripping.
+## Safety and limits
 
-This is the preferred workflow for high-fidelity apparel, packaging and product mockups.
+- remote asset URLs are rejected
+- PSD width/height are limited to 30,000 px
+- manifest documents are capped at 300 MP
+- composite, displacement and perspective-cache work is guarded for very large images
+- vector masks are limited to 20,000 points per layer definition
+- batch replacement is limited to 1,000 entries
+- template writes use a temporary file and atomic rename to avoid leaving a partially written output
 
-## Current boundaries
+## Current format boundaries
 
-- Portable authoring is RGB PSD, not PSB.
-- Perspective uses a 4-corner projective transform. Complex Photoshop warp is preserved by the template workflow but not authored from JSON yet.
-- Generated composite previews use normal alpha compositing; Photoshop blend/effect/clipping semantics are stored but not fully rasterized into that convenience preview.
-- PSD dimensions are capped at 30,000 x 30,000 with a 300 MP manifest guard. Composite and displacement preview work has an 80 MP guard.
-- Remote asset URLs are rejected to keep builds deterministic.
+The portable backend writes RGB PSD, not PSB. `ag-psd` text authoring remains incomplete, so Photoshop can request a text refresh on first open. Complex Photoshop warp and advanced Smart Filters are preserved by template round-tripping but should be finalized by Photoshop itself.
 
 ## Development
 
@@ -167,16 +189,10 @@ npm install
 npm run typecheck
 npm test
 npm run build
+npm run check:uxp
 ```
 
-CI runs these checks on pushes and pull requests.
-
-## Roadmap
-
-1. Multiple named smart-object replacements in a single command
-2. Native vector-mask authoring
-3. Photoshop UXP finalizer for native smart filters, custom warp and exact text rendering
-4. Optional PSB backend for very large documents
+CI runs the suite on Node 20, 22 and 24 and fails on high/critical vulnerabilities in production dependencies. Dependabot is configured for npm and GitHub Actions updates.
 
 ## License
 

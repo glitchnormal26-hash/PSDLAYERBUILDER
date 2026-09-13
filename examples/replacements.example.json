@@ -1,0 +1,12 @@
+{
+  "replacements": [
+    {
+      "path": ["FRONT", "YOUR DESIGN"],
+      "artwork": "assets/front.png"
+    },
+    {
+      "path": ["BACK", "YOUR DESIGN"],
+      "artwork": "assets/back.png"
+    }
+  ]
+}
