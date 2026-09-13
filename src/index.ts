@@ -4,6 +4,7 @@ export { inspectPsd } from './inspect.js';
 export { preflightMagnific, preflightMagnificBatch } from './magnific.js';
 export { replaceSmartObject, replaceSmartObjects, replaceSmartObjectsFromMap } from './template.js';
 export { candidateVectorMask, detectMockupSurfaces } from './surface-detection.js';
+export { inferSurfaceHintFromFilename, renderSurfaceDetectionOverlay } from './surface-review.js';
 export { applyVectorMaskForComposite, compileVectorMask, vectorMaskContains } from './vector-mask.js';
 export { warpPerspective } from './perspective.js';
 export { mockupManifestSchema, replacementMapSchema } from './schema.js';

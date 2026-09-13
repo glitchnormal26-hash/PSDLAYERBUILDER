@@ -6,13 +6,14 @@ import { buildMockupFile } from './engine.js';
 import { inspectPsd } from './inspect.js';
 import { preflightMagnific, preflightMagnificBatch, type MagnificAssetType } from './magnific.js';
 import { detectMockupSurfaces, type SurfaceHint } from './surface-detection.js';
+import { inferSurfaceHintFromFilename, renderSurfaceDetectionOverlay } from './surface-review.js';
 import { replaceSmartObjects, replaceSmartObjectsFromMap } from './template.js';
 
 const program = new Command();
 program
   .name('psdlayer')
   .description('Build, detect, validate and modify editable layered PSD mockups')
-  .version('1.3.0');
+  .version('1.3.1');
 
 program.command('build')
   .argument('<manifest>', 'Path to mockup manifest JSON')
@@ -36,13 +37,16 @@ program.command('detect-surface')
   .option('--hint <hint>', 'auto, screen, poster, frame, page, card, box, bag, garment, round-sign, label, cylinder', 'auto')
   .option('--count <number>', 'Maximum candidate surfaces', '5')
   .option('--max-dimension <pixels>', 'Maximum analysis dimension; original coordinates are restored in output', '1200')
+  .option('--overlay <file>', 'Write a visual candidate-review overlay')
   .action(async (image, options) => {
     try {
-      const hint = parseSurfaceHint(options.hint);
+      const requestedHint = parseSurfaceHint(options.hint);
+      const resolvedHint = requestedHint === 'auto' ? inferSurfaceHintFromFilename(image) : requestedHint;
       const count = parsePositiveInteger(options.count, 'count');
       const maxDimension = parsePositiveInteger(options.maxDimension, 'max-dimension');
-      const result = await detectMockupSurfaces(image, { hint, count, maxDimension });
-      console.log(JSON.stringify(result, null, 2));
+      const result = await detectMockupSurfaces(image, { hint: resolvedHint, count, maxDimension });
+      const overlay = options.overlay ? await renderSurfaceDetectionOverlay(image, result, options.overlay) : undefined;
+      console.log(JSON.stringify({ requestedHint, resolvedHint, ...result, ...(overlay ? { overlay } : {}) }, null, 2));
     } catch (error) {
       reportError(error);
     }
