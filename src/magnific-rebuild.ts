@@ -9,15 +9,8 @@ import { candidateVectorMask, detectMockupSurfaces, type SurfaceCandidate, type 
 import { inferSurfaceHintFromFilename, renderSurfaceDetectionOverlay } from './surface-review.js';
 import type { LayerSpec, MockupManifest, Point } from './types.js';
 
-export interface MagnificRebuildSlotRecipe {
-  label: string;
-  hint: SurfaceHint;
-}
-
-export interface MagnificRebuildRecipe {
-  slots: MagnificRebuildSlotRecipe[];
-}
-
+export interface MagnificRebuildSlotRecipe { label: string; hint: SurfaceHint; }
+export interface MagnificRebuildRecipe { slots: MagnificRebuildSlotRecipe[]; }
 export interface MagnificRebuildOptions {
   inputDirectory: string;
   outputDirectory: string;
@@ -25,152 +18,97 @@ export interface MagnificRebuildOptions {
   minimumConfidence?: number;
   maxAnalysisDimension?: number;
 }
-
 export interface MagnificRebuildItem {
   source: string;
   psd: string;
   preview: string;
   manifest: string;
   overlay: string;
-  slots: Array<{
-    label: string;
-    hint: SurfaceHint;
-    kind: SurfaceCandidate['kind'];
-    confidence: number;
-  }>;
+  slots: Array<{ label: string; hint: SurfaceHint; kind: SurfaceCandidate['kind']; confidence: number }>;
   preflight: MagnificPreflightResult;
   warnings: string[];
 }
-
-export interface MagnificRebuildResult {
-  ok: boolean;
-  outputDirectory: string;
-  items: MagnificRebuildItem[];
-  warnings: string[];
-}
+export interface MagnificRebuildResult { ok: boolean; outputDirectory: string; items: MagnificRebuildItem[]; warnings: string[]; }
 
 const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.tif', '.tiff']);
-
-function normalizeName(file: string): string {
-  return path.basename(file, path.extname(file)).toLowerCase().replace(/[_-]+/g, ' ');
-}
+const slot = (label: string, hint: SurfaceHint): MagnificRebuildSlotRecipe => ({ label, hint });
 
 export function inferMagnificRebuildRecipe(file: string): MagnificRebuildRecipe {
-  const name = normalizeName(file);
-  if (/stationery/.test(name)) return { slots: [
-    { label: 'LETTERHEAD', hint: 'page' },
-    { label: 'CARD FRONT', hint: 'card' },
-    { label: 'CARD BACK', hint: 'card' },
-    { label: 'ENVELOPE', hint: 'page' },
-  ] };
-  if (/takeaway/.test(name)) return { slots: [
-    { label: 'BAG', hint: 'bag' },
-    { label: 'BOX LID', hint: 'box' },
-  ] };
-  if (/open magazine|magazine/.test(name)) return { slots: [
-    { label: 'LEFT PAGE', hint: 'page' },
-    { label: 'RIGHT PAGE', hint: 'page' },
-  ] };
-  if (/gallery frames|gallery/.test(name)) return { slots: [
-    { label: 'FRAME LEFT', hint: 'frame' },
-    { label: 'FRAME MIDDLE', hint: 'frame' },
-    { label: 'FRAME RIGHT', hint: 'frame' },
-  ] };
-  if (/device workspace|workspace/.test(name)) return { slots: [
-    { label: 'TABLET SCREEN', hint: 'screen' },
-    { label: 'PHONE SCREEN', hint: 'screen' },
-  ] };
-  if (/wine packaging|wine/.test(name)) return { slots: [
-    { label: 'BOTTLE LABEL', hint: 'cylinder' },
-    { label: 'TUBE FRONT', hint: 'cylinder' },
-  ] };
-  if (/round.*sign|store sign/.test(name)) return { slots: [{ label: 'ROUND SIGN', hint: 'round-sign' }] };
-  if (/amber.*jar|supplement.*jar|\bjar\b/.test(name)) return { slots: [{ label: 'JAR LABEL', hint: 'cylinder' }] };
-  if (/\bcan\b/.test(name)) return { slots: [{ label: 'CAN LABEL', hint: 'cylinder' }] };
-  if (/laptop/.test(name)) return { slots: [{ label: 'SCREEN', hint: 'screen' }] };
-  if (/phone/.test(name)) return { slots: [{ label: 'PHONE SCREEN', hint: 'screen' }] };
-  if (/bus.*stop|poster/.test(name)) return { slots: [{ label: 'POSTER', hint: 'poster' }] };
-  if (/business.*card/.test(name)) return { slots: [{ label: 'BUSINESS CARD', hint: 'card' }] };
-  if (/frame/.test(name)) return { slots: [{ label: 'FRAME', hint: 'frame' }] };
-  if (/tote/.test(name)) return { slots: [{ label: 'TOTE PRINT', hint: 'garment' }] };
-  if (/shirt|tshirt|t-shirt/.test(name)) return { slots: [{ label: 'SHIRT PRINT', hint: 'garment' }] };
-  if (/coffee.*packaging|coffee.*bag/.test(name)) return { slots: [{ label: 'BAG', hint: 'bag' }] };
-  if (/gift.*box|box/.test(name)) return { slots: [{ label: 'BOX LID', hint: 'box' }] };
-  if (/skincare|cosmetic/.test(name)) return { slots: [{ label: 'PACKAGE FRONT', hint: 'box' }] };
-  return { slots: [{ label: 'DESIGN', hint: inferSurfaceHintFromFilename(file) }] };
+  const name = path.basename(file, path.extname(file)).toLowerCase().replace(/[_-]+/g, ' ');
+  if (/stationery/.test(name)) return { slots: [slot('LETTERHEAD', 'page'), slot('CARD FRONT', 'card'), slot('CARD BACK', 'card'), slot('ENVELOPE', 'page')] };
+  if (/takeaway/.test(name)) return { slots: [slot('BAG', 'bag'), slot('BOX LID', 'box')] };
+  if (/magazine/.test(name)) return { slots: [slot('LEFT PAGE', 'page'), slot('RIGHT PAGE', 'page')] };
+  if (/gallery/.test(name)) return { slots: [slot('FRAME LEFT', 'frame'), slot('FRAME MIDDLE', 'frame'), slot('FRAME RIGHT', 'frame')] };
+  if (/device workspace|workspace/.test(name)) return { slots: [slot('TABLET SCREEN', 'screen'), slot('PHONE SCREEN', 'screen')] };
+  if (/wine/.test(name)) return { slots: [slot('BOTTLE LABEL', 'cylinder'), slot('TUBE FRONT', 'cylinder')] };
+  if (/round.*sign|store sign/.test(name)) return { slots: [slot('ROUND SIGN', 'round-sign')] };
+  if (/amber.*jar|supplement.*jar|\bjar\b/.test(name)) return { slots: [slot('JAR LABEL', 'cylinder')] };
+  if (/\bcan\b/.test(name)) return { slots: [slot('CAN LABEL', 'cylinder')] };
+  if (/laptop/.test(name)) return { slots: [slot('SCREEN', 'screen')] };
+  if (/phone/.test(name)) return { slots: [slot('PHONE SCREEN', 'screen')] };
+  if (/bus.*stop|poster/.test(name)) return { slots: [slot('POSTER', 'poster')] };
+  if (/business.*card/.test(name)) return { slots: [slot('BUSINESS CARD', 'card')] };
+  if (/frame/.test(name)) return { slots: [slot('FRAME', 'frame')] };
+  if (/tote/.test(name)) return { slots: [slot('TOTE PRINT', 'garment')] };
+  if (/shirt|tshirt|t-shirt/.test(name)) return { slots: [slot('SHIRT PRINT', 'garment')] };
+  if (/coffee.*packaging|coffee.*bag/.test(name)) return { slots: [slot('BAG', 'bag')] };
+  if (/gift.*box|box/.test(name)) return { slots: [slot('BOX LID', 'box')] };
+  if (/skincare|cosmetic/.test(name)) return { slots: [slot('PACKAGE FRONT', 'box')] };
+  return { slots: [slot('DESIGN', inferSurfaceHintFromFilename(file))] };
 }
 
-function candidateBounds(candidate: SurfaceCandidate, width: number, height: number): { left: number; top: number; width: number; height: number } {
-  const xs = candidate.polygon.map((point) => point[0]);
-  const ys = candidate.polygon.map((point) => point[1]);
+function bounds(candidate: SurfaceCandidate, width?: number, height?: number) {
+  const xs = candidate.polygon.map(([x]) => x);
+  const ys = candidate.polygon.map(([, y]) => y);
   const left = Math.max(0, Math.floor(Math.min(...xs)));
   const top = Math.max(0, Math.floor(Math.min(...ys)));
-  const right = Math.min(width, Math.ceil(Math.max(...xs)));
-  const bottom = Math.min(height, Math.ceil(Math.max(...ys)));
-  return { left, top, width: Math.max(1, right - left), height: Math.max(1, bottom - top) };
+  const right = Math.min(width ?? Number.MAX_SAFE_INTEGER, Math.ceil(Math.max(...xs)));
+  const bottom = Math.min(height ?? Number.MAX_SAFE_INTEGER, Math.ceil(Math.max(...ys)));
+  return { left, top, width: Math.max(1, right - left), height: Math.max(1, bottom - top), right, bottom };
 }
 
-function boundsIou(a: SurfaceCandidate, b: SurfaceCandidate): number {
-  const bounds = (candidate: SurfaceCandidate) => {
-    const xs = candidate.polygon.map((point) => point[0]);
-    const ys = candidate.polygon.map((point) => point[1]);
-    return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)] as const;
-  };
-  const aa = bounds(a);
-  const bb = bounds(b);
-  const left = Math.max(aa[0], bb[0]);
-  const top = Math.max(aa[1], bb[1]);
-  const right = Math.min(aa[2], bb[2]);
-  const bottom = Math.min(aa[3], bb[3]);
+function iou(a: SurfaceCandidate, b: SurfaceCandidate): number {
+  const aa = bounds(a); const bb = bounds(b);
+  const left = Math.max(aa.left, bb.left); const top = Math.max(aa.top, bb.top);
+  const right = Math.min(aa.right, bb.right); const bottom = Math.min(aa.bottom, bb.bottom);
   const intersection = Math.max(0, right - left) * Math.max(0, bottom - top);
-  const areaA = Math.max(1, (aa[2] - aa[0]) * (aa[3] - aa[1]));
-  const areaB = Math.max(1, (bb[2] - bb[0]) * (bb[3] - bb[1]));
-  return intersection / (areaA + areaB - intersection);
+  return intersection / Math.max(1, aa.width * aa.height + bb.width * bb.height - intersection);
 }
 
-function chooseCandidate(result: SurfaceDetectionResult, used: SurfaceCandidate[], hintIndex: number): SurfaceCandidate {
-  const preferred = result.candidates.filter((candidate) => !used.some((existing) => boundsIou(existing, candidate) > 0.48));
-  return preferred[hintIndex] ?? preferred[0] ?? result.candidates[hintIndex] ?? result.candidates[0];
+function chooseCandidate(result: SurfaceDetectionResult, used: SurfaceCandidate[], index: number): SurfaceCandidate {
+  const free = result.candidates.filter((candidate) => !used.some((existing) => iou(existing, candidate) > 0.48));
+  return free[index] ?? free[0] ?? result.candidates[index] ?? result.candidates[0];
 }
 
-function computeTargetSize(width: number, height: number): { width: number; height: number; warning?: string } {
-  const lowerScale = Math.max(1, 2001 / Math.min(width, height));
-  const upperScale = Math.min(1, 4999 / Math.max(width, height));
-  let scale = Math.min(lowerScale, upperScale);
-  let warning: string | undefined;
-  if (lowerScale > upperScale) {
-    scale = upperScale;
-    warning = 'Source aspect ratio cannot satisfy both the 2,000 px preview minimum and the <5,000 px PSD maximum on every axis; resized to stay below the PSD maximum.';
-  }
-  return { width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)), warning };
+function targetSize(width: number, height: number): { width: number; height: number; warning?: string } {
+  const minScale = Math.max(1, 2001 / Math.min(width, height));
+  const maxScale = Math.min(1, 4999 / Math.max(width, height));
+  const scale = Math.min(minScale, maxScale);
+  return {
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale)),
+    ...(minScale > maxScale ? { warning: 'Extreme aspect ratio cannot satisfy both preview minimum and PSD maximum dimensions; manual review required.' } : {}),
+  };
 }
 
-function xmlEscape(value: string): string {
-  return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }[char] ?? char));
-}
-
-function averageQuadAspect(candidate: SurfaceCandidate): number {
+function averageAspect(candidate: SurfaceCandidate): number {
   const q = candidate.quad;
-  const dist = (x1: number, y1: number, x2: number, y2: number) => Math.max(1, Math.hypot(x2 - x1, y2 - y1));
-  const w = (dist(q[0], q[1], q[2], q[3]) + dist(q[6], q[7], q[4], q[5])) / 2;
-  const h = (dist(q[0], q[1], q[6], q[7]) + dist(q[2], q[3], q[4], q[5])) / 2;
+  const d = (a: number, b: number, c: number, e: number) => Math.max(1, Math.hypot(c - a, e - b));
+  const w = (d(q[0], q[1], q[2], q[3]) + d(q[6], q[7], q[4], q[5])) / 2;
+  const h = (d(q[0], q[1], q[6], q[7]) + d(q[2], q[3], q[4], q[5])) / 2;
   return Math.max(0.2, Math.min(5, w / h));
 }
 
-async function createPlaceholder(file: string, label: string, candidate: SurfaceCandidate): Promise<void> {
-  const aspect = averageQuadAspect(candidate);
-  const maxDimension = 1800;
-  const width = aspect >= 1 ? maxDimension : Math.max(720, Math.round(maxDimension * aspect));
-  const height = aspect >= 1 ? Math.max(720, Math.round(maxDimension / aspect)) : maxDimension;
-  const fontSize = Math.max(42, Math.round(Math.min(width, height) / 9));
-  const safeLabel = xmlEscape(label);
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
-    <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#20242a"/><stop offset="1" stop-color="#5d6775"/></linearGradient></defs>
-    <rect width="100%" height="100%" fill="url(#g)"/>
-    <path d="M0 ${height * 0.18} L${width} ${height * 0.03} M0 ${height * 0.82} L${width} ${height * 0.97}" stroke="#fff" stroke-opacity="0.3" stroke-width="${Math.max(4, fontSize / 12)}"/>
-    <text x="50%" y="46%" text-anchor="middle" font-family="Arial,sans-serif" font-size="${fontSize}" font-weight="700" fill="#fff">PLACE DESIGN</text>
-    <text x="50%" y="58%" text-anchor="middle" font-family="Arial,sans-serif" font-size="${Math.round(fontSize * 0.48)}" fill="#fff" fill-opacity="0.88">${safeLabel}</text>
-  </svg>`;
+function escapeXml(value: string): string {
+  return value.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }[c] ?? c));
+}
+
+async function placeholder(file: string, label: string, candidate: SurfaceCandidate): Promise<void> {
+  const aspect = averageAspect(candidate);
+  const width = aspect >= 1 ? 1800 : Math.max(720, Math.round(1800 * aspect));
+  const height = aspect >= 1 ? Math.max(720, Math.round(1800 / aspect)) : 1800;
+  const size = Math.max(42, Math.round(Math.min(width, height) / 9));
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><defs><linearGradient id="g" x2="1" y2="1"><stop stop-color="#20242a"/><stop offset="1" stop-color="#667180"/></linearGradient></defs><rect width="100%" height="100%" fill="url(#g)"/><path d="M0 ${height * .16}L${width} ${height * .04}M0 ${height * .84}L${width} ${height * .96}" stroke="#fff" stroke-opacity=".3" stroke-width="8"/><text x="50%" y="46%" text-anchor="middle" font-family="Arial" font-size="${size}" font-weight="700" fill="#fff">PLACE DESIGN</text><text x="50%" y="59%" text-anchor="middle" font-family="Arial" font-size="${Math.round(size * .48)}" fill="#fff">${escapeXml(label)}</text></svg>`;
   await sharp(Buffer.from(svg)).png().toFile(file);
 }
 
@@ -178,184 +116,106 @@ function localPolygon(points: Point[], left: number, top: number): string {
   return points.map(([x, y]) => `${(x - left).toFixed(1)},${(y - top).toFixed(1)}`).join(' ');
 }
 
-async function makeLightingTexture(scene: string, candidate: SurfaceCandidate, sceneWidth: number, sceneHeight: number, output: string): Promise<{ left: number; top: number; width: number; height: number }> {
-  const box = candidateBounds(candidate, sceneWidth, sceneHeight);
-  await sharp(scene)
-    .extract(box)
-    .grayscale()
-    .normalise({ lower: 2, upper: 98 })
-    .linear(0.34, 84)
-    .png()
-    .toFile(output);
+async function makeLighting(scene: string, candidate: SurfaceCandidate, sceneWidth: number, sceneHeight: number, output: string) {
+  const box = bounds(candidate, sceneWidth, sceneHeight);
+  await sharp(scene).extract({ left: box.left, top: box.top, width: box.width, height: box.height }).grayscale().normalise().linear(0.34, 84).png().toFile(output);
   return box;
 }
 
-async function warpedArtworkBuffer(placeholder: string, candidate: SurfaceCandidate): Promise<{ input: Buffer; left: number; top: number }> {
-  const source = await readRgba(placeholder);
+async function warpedBuffer(file: string, candidate: SurfaceCandidate): Promise<{ input: Buffer; left: number; top: number }> {
+  const source = await readRgba(file);
   const warped = warpPerspective(source, candidate.quad);
-  const polygon = localPolygon(candidate.polygon, warped.left, warped.top);
-  const mask = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${warped.image.width}" height="${warped.image.height}"><polygon points="${polygon}" fill="#fff"/></svg>`);
-  const input = await sharp(Buffer.from(warped.image.data.buffer, warped.image.data.byteOffset, warped.image.data.byteLength), {
-    raw: { width: warped.image.width, height: warped.image.height, channels: 4 },
-  }).composite([{ input: mask, blend: 'dest-in' }]).png().toBuffer();
+  const mask = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${warped.image.width}" height="${warped.image.height}"><polygon points="${localPolygon(candidate.polygon, warped.left, warped.top)}" fill="#fff"/></svg>`);
+  const input = await sharp(Buffer.from(warped.image.data), { raw: { width: warped.image.width, height: warped.image.height, channels: 4 } }).composite([{ input: mask, blend: 'dest-in' }]).png().toBuffer();
   return { input, left: warped.left, top: warped.top };
 }
 
-async function buildPreview(scene: string, slots: Array<{ candidate: SurfaceCandidate; placeholder: string; lighting: string; lightingBox: { left: number; top: number; width: number; height: number } }>, output: string): Promise<void> {
-  const composites: sharp.OverlayOptions[] = [];
-  for (const slot of slots) {
-    const warped = await warpedArtworkBuffer(slot.placeholder, slot.candidate);
+async function makePreview(scene: string, slots: Array<{ candidate: SurfaceCandidate; artwork: string; lighting: string; box: ReturnType<typeof bounds> }>, output: string): Promise<void> {
+  const composites: any[] = [];
+  for (const item of slots) {
+    const warped = await warpedBuffer(item.artwork, item.candidate);
     composites.push({ input: warped.input, left: warped.left, top: warped.top, blend: 'over' });
-    const polygon = localPolygon(slot.candidate.polygon, slot.lightingBox.left, slot.lightingBox.top);
-    const mask = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${slot.lightingBox.width}" height="${slot.lightingBox.height}"><polygon points="${polygon}" fill="#fff"/></svg>`);
-    const lighting = await sharp(slot.lighting).ensureAlpha().composite([{ input: mask, blend: 'dest-in' }]).png().toBuffer();
-    composites.push({ input: lighting, left: slot.lightingBox.left, top: slot.lightingBox.top, blend: 'soft-light' });
+    const mask = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${item.box.width}" height="${item.box.height}"><polygon points="${localPolygon(item.candidate.polygon, item.box.left, item.box.top)}" fill="#fff"/></svg>`);
+    const lighting = await sharp(item.lighting).ensureAlpha().composite([{ input: mask, blend: 'dest-in' }]).png().toBuffer();
+    composites.push({ input: lighting, left: item.box.left, top: item.box.top, blend: 'soft-light' });
   }
-  await sharp(scene)
-    .composite(composites)
-    .jpeg({ quality: 94, chromaSubsampling: '4:4:4' })
-    .toFile(output);
-}
-
-function smartObjectName(label: string): string {
-  return `Place your design here — ${label} (Double click to edit)`;
+  await sharp(scene).composite(composites).jpeg({ quality: 94, chromaSubsampling: '4:4:4' }).toFile(output);
 }
 
 export async function rebuildMagnificBatch(options: MagnificRebuildOptions): Promise<MagnificRebuildResult> {
-  const inputDirectory = path.resolve(options.inputDirectory);
-  const outputDirectory = path.resolve(options.outputDirectory);
-  const deliveryDirectory = path.join(outputDirectory, 'delivery');
-  const manifestDirectory = path.join(outputDirectory, 'manifests');
-  const reviewDirectory = path.join(outputDirectory, 'review');
-  const workRoot = path.join(outputDirectory, '.work');
-  await mkdir(deliveryDirectory, { recursive: true });
-  await mkdir(manifestDirectory, { recursive: true });
-  await mkdir(reviewDirectory, { recursive: true });
-  await mkdir(workRoot, { recursive: true });
-
-  const sourceFiles = (await readdir(inputDirectory, { withFileTypes: true }))
-    .filter((entry) => entry.isFile() && IMAGE_EXTENSIONS.has(path.extname(entry.name).toLowerCase()))
-    .map((entry) => entry.name)
-    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-  if (!sourceFiles.length) throw new Error(`No supported source images found in ${inputDirectory}`);
+  const input = path.resolve(options.inputDirectory);
+  const output = path.resolve(options.outputDirectory);
+  const delivery = path.join(output, 'delivery');
+  const manifests = path.join(output, 'manifests');
+  const review = path.join(output, 'review');
+  const workRoot = path.join(output, '.work');
+  await Promise.all([delivery, manifests, review, workRoot].map((directory) => mkdir(directory, { recursive: true })));
+  const files = (await readdir(input, { withFileTypes: true })).filter((entry) => entry.isFile() && IMAGE_EXTENSIONS.has(path.extname(entry.name).toLowerCase())).map((entry) => entry.name).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  if (!files.length) throw new Error(`No supported source images found in ${input}`);
 
   const items: MagnificRebuildItem[] = [];
-  const batchWarnings: string[] = [];
-  const minimumConfidence = Math.max(0, Math.min(1, options.minimumConfidence ?? 0.5));
-  const maxAnalysisDimension = Math.max(480, Math.min(2400, options.maxAnalysisDimension ?? 1600));
+  const threshold = Math.max(0, Math.min(1, options.minimumConfidence ?? 0.5));
+  const analysisSize = Math.max(480, Math.min(2400, options.maxAnalysisDimension ?? 1600));
 
-  for (const fileName of sourceFiles) {
-    const source = path.join(inputDirectory, fileName);
-    const baseName = path.basename(fileName, path.extname(fileName));
-    const workDirectory = path.join(workRoot, baseName);
-    await rm(workDirectory, { recursive: true, force: true });
-    await mkdir(workDirectory, { recursive: true });
-    const warnings: string[] = [];
-    const metadata = await sharp(source).metadata();
-    if (!metadata.width || !metadata.height) throw new Error(`Unable to determine source dimensions: ${source}`);
-    const target = computeTargetSize(metadata.width, metadata.height);
-    if (target.warning) warnings.push(target.warning);
-    const scene = path.join(workDirectory, 'scene.jpg');
-    await sharp(source, { failOn: 'error' })
-      .resize({ width: target.width, height: target.height, fit: 'fill' })
-      .toColourspace('srgb')
-      .jpeg({ quality: 96, chromaSubsampling: '4:4:4' })
-      .toFile(scene);
+  for (const fileName of files) {
+    const source = path.join(input, fileName);
+    const base = path.basename(fileName, path.extname(fileName));
+    const work = path.join(workRoot, base);
+    await rm(work, { recursive: true, force: true }); await mkdir(work, { recursive: true });
+    const meta = await sharp(source).metadata();
+    if (!meta.width || !meta.height) throw new Error(`Unable to read dimensions: ${source}`);
+    const size = targetSize(meta.width, meta.height);
+    const warnings: string[] = size.warning ? [size.warning] : [];
+    const scene = path.join(work, 'scene.jpg');
+    await sharp(source).resize(size.width, size.height, { fit: 'fill' }).toColourspace('srgb').jpeg({ quality: 96, chromaSubsampling: '4:4:4' }).toFile(scene);
 
     const recipe = inferMagnificRebuildRecipe(fileName);
-    const detectionCache = new Map<SurfaceHint, Promise<SurfaceDetectionResult>>();
-    const hintUsage = new Map<SurfaceHint, number>();
+    const cache = new Map<SurfaceHint, Promise<SurfaceDetectionResult>>();
+    const usage = new Map<SurfaceHint, number>();
     const used: SurfaceCandidate[] = [];
-    const builtSlots: Array<{ label: string; hint: SurfaceHint; candidate: SurfaceCandidate; placeholder: string; lighting: string; lightingBox: { left: number; top: number; width: number; height: number } }> = [];
+    const built: Array<{ label: string; hint: SurfaceHint; candidate: SurfaceCandidate; artwork: string; lighting: string; box: ReturnType<typeof bounds> }> = [];
 
-    for (const slot of recipe.slots) {
-      let pending = detectionCache.get(slot.hint);
-      if (!pending) {
-        pending = detectMockupSurfaces(scene, { hint: slot.hint, count: 10, maxDimension: maxAnalysisDimension });
-        detectionCache.set(slot.hint, pending);
-      }
+    for (const spec of recipe.slots) {
+      let pending = cache.get(spec.hint);
+      if (!pending) { pending = detectMockupSurfaces(scene, { hint: spec.hint, count: 10, maxDimension: analysisSize }); cache.set(spec.hint, pending); }
       const detection = await pending;
-      const index = hintUsage.get(slot.hint) ?? 0;
-      hintUsage.set(slot.hint, index + 1);
-      const candidate = chooseCandidate(detection, used, index);
-      used.push(candidate);
-      if (candidate.confidence < minimumConfidence) warnings.push(`${slot.label}: detection confidence ${(candidate.confidence * 100).toFixed(0)}% is below the ${(minimumConfidence * 100).toFixed(0)}% production threshold; review the overlay.`);
-      const placeholder = path.join(workDirectory, `artwork-${builtSlots.length + 1}.png`);
-      const lighting = path.join(workDirectory, `lighting-${builtSlots.length + 1}.png`);
-      await createPlaceholder(placeholder, slot.label, candidate);
-      const lightingBox = await makeLightingTexture(scene, candidate, target.width, target.height, lighting);
-      builtSlots.push({ label: slot.label, hint: slot.hint, candidate, placeholder, lighting, lightingBox });
+      const index = usage.get(spec.hint) ?? 0; usage.set(spec.hint, index + 1);
+      const candidate = chooseCandidate(detection, used, index); used.push(candidate);
+      if (candidate.confidence < threshold) warnings.push(`${spec.label}: ${(candidate.confidence * 100).toFixed(0)}% detection confidence; inspect review overlay.`);
+      const artwork = path.join(work, `artwork-${built.length + 1}.png`);
+      const lighting = path.join(work, `lighting-${built.length + 1}.png`);
+      await placeholder(artwork, spec.label, candidate);
+      const box = await makeLighting(scene, candidate, size.width, size.height, lighting);
+      built.push({ label: spec.label, hint: spec.hint, candidate, artwork, lighting, box });
     }
 
-    const overlayDetection: SurfaceDetectionResult = {
-      image: { width: target.width, height: target.height },
-      analysis: { width: target.width, height: target.height, scale: 1 },
-      hint: 'auto',
-      candidates: builtSlots.map((slot) => slot.candidate),
-      warnings: [],
-    };
-    const overlay = path.join(reviewDirectory, `${baseName}-detection.jpg`);
-    await renderSurfaceDetectionOverlay(scene, overlayDetection, overlay);
+    const overlay = path.join(review, `${base}-detection.jpg`);
+    await renderSurfaceDetectionOverlay(scene, { image: { width: size.width, height: size.height }, analysis: { width: size.width, height: size.height, scale: 1 }, hint: 'auto', candidates: built.map((item) => item.candidate), warnings: [] }, overlay);
 
-    const layers: LayerSpec[] = [];
-    for (const slot of builtSlots) {
-      const mask = candidateVectorMask(slot.candidate);
-      layers.push({
-        type: 'group',
-        name: `EDIT — ${slot.label}`,
-        opened: true,
-        children: [
-          {
-            type: 'raster',
-            name: `Surface lighting — ${slot.label} (Do not edit)`,
-            source: path.relative(workDirectory, slot.lighting),
-            x: slot.lightingBox.left,
-            y: slot.lightingBox.top,
-            width: slot.lightingBox.width,
-            height: slot.lightingBox.height,
-            blendMode: 'soft light',
-            clipping: true,
-            vectorMask: mask,
-          },
-          {
-            type: 'smart-object',
-            name: smartObjectName(slot.label),
-            source: path.relative(workDirectory, slot.placeholder),
-            quad: slot.candidate.quad,
-            vectorMask: mask,
-            ...(slot.candidate.nativeWarp ? { nativeWarp: slot.candidate.nativeWarp } : {}),
-          },
+    const layers: LayerSpec[] = built.map((item) => {
+      const vectorMask = candidateVectorMask(item.candidate);
+      return {
+        type: 'group', name: `EDIT — ${item.label}`, opened: true, children: [
+          { type: 'raster', name: `Surface lighting — ${item.label} (Do not edit)`, source: path.relative(work, item.lighting), x: item.box.left, y: item.box.top, width: item.box.width, height: item.box.height, blendMode: 'soft light', clipping: true, vectorMask },
+          { type: 'smart-object', name: `Place your design here — ${item.label} (Double click to edit)`, source: path.relative(work, item.artwork), quad: item.candidate.quad, vectorMask, ...(item.candidate.nativeWarp ? { nativeWarp: item.candidate.nativeWarp } : {}) },
         ],
-      });
-    }
-    layers.push({ type: 'raster', name: 'BACKGROUND — Mockup scene', source: path.relative(workDirectory, scene), x: 0, y: 0, width: target.width, height: target.height });
-
-    const manifestObject: MockupManifest = {
-      version: 1,
-      document: { width: target.width, height: target.height, dpi: 72, background: '#ffffff' },
-      layers,
-    };
-    const manifestFile = path.join(manifestDirectory, `${baseName}.mockup.json`);
-    await writeFile(manifestFile, JSON.stringify(manifestObject, null, 2));
-    const psd = path.join(deliveryDirectory, `${baseName}.psd`);
-    await buildMockup(manifestObject, { output: psd, cwd: workDirectory, generateComposite: false });
-    const preview = path.join(deliveryDirectory, `${baseName}.jpg`);
-    await buildPreview(scene, builtSlots, preview);
-    const preflight = await preflightMagnific(psd, preview, { type: 'mockup', createdByAi: Boolean(options.createdByAi) });
-    items.push({
-      source,
-      psd,
-      preview,
-      manifest: manifestFile,
-      overlay,
-      slots: builtSlots.map((slot) => ({ label: slot.label, hint: slot.hint, kind: slot.candidate.kind, confidence: slot.candidate.confidence })),
-      preflight,
-      warnings,
+      } as LayerSpec;
     });
+    layers.push({ type: 'raster', name: 'BACKGROUND — Mockup scene', source: path.relative(work, scene), x: 0, y: 0, width: size.width, height: size.height });
+    const manifestObject: MockupManifest = { version: 1, document: { width: size.width, height: size.height, dpi: 72, background: '#ffffff' }, layers };
+    const manifestFile = path.join(manifests, `${base}.mockup.json`);
+    await writeFile(manifestFile, JSON.stringify(manifestObject, null, 2));
+    const psd = path.join(delivery, `${base}.psd`);
+    await buildMockup(manifestObject, { output: psd, cwd: work, generateComposite: false });
+    const preview = path.join(delivery, `${base}.jpg`);
+    await makePreview(scene, built, preview);
+    const preflight = await preflightMagnific(psd, preview, { type: 'mockup', createdByAi: Boolean(options.createdByAi) });
+    items.push({ source, psd, preview, manifest: manifestFile, overlay, slots: built.map((item) => ({ label: item.label, hint: item.hint, kind: item.candidate.kind, confidence: item.candidate.confidence })), preflight, warnings });
   }
 
-  if (items.some((item) => !item.preflight.ok)) batchWarnings.push('One or more rebuilt pairs failed automatic Magnific preflight. Check each item before submission.');
-  if (items.some((item) => item.warnings.length)) batchWarnings.push('One or more surface detections require visual review. Use the files in the review directory.');
-  await writeFile(path.join(outputDirectory, 'rebuild-report.json'), JSON.stringify({ items, warnings: batchWarnings }, null, 2));
-  return { ok: items.every((item) => item.preflight.ok), outputDirectory, items, warnings: batchWarnings };
+  const warnings: string[] = [];
+  if (items.some((item) => !item.preflight.ok)) warnings.push('One or more PSD/JPG pairs failed automatic Magnific preflight.');
+  if (items.some((item) => item.warnings.length)) warnings.push('One or more geometry detections require visual review.');
+  await writeFile(path.join(output, 'rebuild-report.json'), JSON.stringify({ items, warnings }, null, 2));
+  return { ok: items.every((item) => item.preflight.ok), outputDirectory: output, items, warnings };
 }
