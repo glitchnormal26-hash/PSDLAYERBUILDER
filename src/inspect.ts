@@ -29,13 +29,13 @@ function classify(layer: any): LayerTreeNode['type'] {
 
 function toNode(layer: any, parent: string[], linkedById: Map<string, any>): LayerTreeNode {
   const name = layer.name ?? '(unnamed)';
-  const path = [...parent, name];
-  const children = Array.isArray(layer.children) ? layer.children.map((child: any) => toNode(child, path, linkedById)) : undefined;
-  const linkedId = layer.placedLayer?.id;
+  const layerPath = [...parent, name];
+  const children = Array.isArray(layer.children) ? layer.children.map((child: any) => toNode(child, layerPath, linkedById)) : undefined;
+  const linkedId = layer.placedLayer?.id ? String(layer.placedLayer.id) : undefined;
   const linked = linkedId ? linkedById.get(linkedId) : undefined;
   return {
     name,
-    path: path.join('/'),
+    path: layerPath.join('/'),
     type: classify(layer),
     hidden: Boolean(layer.hidden),
     clipping: Boolean(layer.clipping),
@@ -61,7 +61,10 @@ export async function inspectPsd(file: string): Promise<{ width: number; height:
     skipCompositeImageData: true,
     skipThumbnail: true,
   });
-  const linkedById = new Map((psd.linkedFiles ?? []).map((linked: any) => [linked.id, linked]));
+  const linkedEntries: [string, any][] = (psd.linkedFiles ?? [])
+    .filter((linked: any) => linked?.id !== undefined)
+    .map((linked: any) => [String(linked.id), linked]);
+  const linkedById = new Map<string, any>(linkedEntries);
   return {
     width: psd.width,
     height: psd.height,
