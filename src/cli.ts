@@ -5,13 +5,14 @@ import { doctorPsd } from './doctor.js';
 import { buildMockupFile } from './engine.js';
 import { inspectPsd } from './inspect.js';
 import { preflightMagnific, preflightMagnificBatch, type MagnificAssetType } from './magnific.js';
+import { detectMockupSurfaces, type SurfaceHint } from './surface-detection.js';
 import { replaceSmartObjects, replaceSmartObjectsFromMap } from './template.js';
 
 const program = new Command();
 program
   .name('psdlayer')
-  .description('Build, validate and modify editable layered PSD mockups')
-  .version('1.2.0');
+  .description('Build, detect, validate and modify editable layered PSD mockups')
+  .version('1.3.0');
 
 program.command('build')
   .argument('<manifest>', 'Path to mockup manifest JSON')
@@ -25,6 +26,23 @@ program.command('build')
       console.log(`PSD written: ${result.output}`);
       console.log(`Layers: ${result.layerCount} | Smart objects: ${result.smartObjectCount} | Bytes: ${result.bytes}`);
       for (const warning of result.warnings) console.warn(`Warning: ${warning}`);
+    } catch (error) {
+      reportError(error);
+    }
+  });
+
+program.command('detect-surface')
+  .argument('<image>', 'Mockup source photo')
+  .option('--hint <hint>', 'auto, screen, poster, frame, page, card, box, bag, garment, round-sign, label, cylinder', 'auto')
+  .option('--count <number>', 'Maximum candidate surfaces', '5')
+  .option('--max-dimension <pixels>', 'Maximum analysis dimension; original coordinates are restored in output', '1200')
+  .action(async (image, options) => {
+    try {
+      const hint = parseSurfaceHint(options.hint);
+      const count = parsePositiveInteger(options.count, 'count');
+      const maxDimension = parsePositiveInteger(options.maxDimension, 'max-dimension');
+      const result = await detectMockupSurfaces(image, { hint, count, maxDimension });
+      console.log(JSON.stringify(result, null, 2));
     } catch (error) {
       reportError(error);
     }
@@ -134,6 +152,19 @@ program.command('magnific-batch')
       reportError(error);
     }
   });
+
+function parseSurfaceHint(value: unknown): SurfaceHint {
+  const hint = String(value);
+  const allowed: SurfaceHint[] = ['auto', 'screen', 'poster', 'frame', 'page', 'card', 'box', 'bag', 'garment', 'round-sign', 'label', 'cylinder'];
+  if (allowed.includes(hint as SurfaceHint)) return hint as SurfaceHint;
+  throw new Error(`Invalid surface hint: ${hint}`);
+}
+
+function parsePositiveInteger(value: unknown, label: string): number {
+  const parsed = Number.parseInt(String(value), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) throw new Error(`Invalid ${label}: ${value}`);
+  return parsed;
+}
 
 function parseMagnificType(value: unknown): MagnificAssetType {
   const type = String(value);

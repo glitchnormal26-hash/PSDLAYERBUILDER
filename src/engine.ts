@@ -8,7 +8,7 @@ import { readRgba, imageMetadata, parseHexColor, solidRgba, type RgbaImage } fro
 import { warpPerspective } from './perspective.js';
 import { mockupManifestSchema } from './schema.js';
 import { applyVectorMaskForComposite, compileVectorMask } from './vector-mask.js';
-import type { BuildOptions, BuildResult, LayerMaskSpec, LayerSpec, MockupManifest, Quad } from './types.js';
+import type { BuildOptions, BuildResult, LayerMaskSpec, LayerSpec, MockupManifest, NativeWarpSpec, Quad } from './types.js';
 
 interface CompileContext {
   cwd: string;
@@ -146,6 +146,51 @@ function applyMaskForComposite(source: RgbaImage, layerLeft: number, layerTop: n
   return { width: source.width, height: source.height, data };
 }
 
+function compileNativeWarp(spec: NativeWarpSpec, transform: Quad | undefined): any | undefined {
+  if (!transform) return undefined;
+  const xs = [transform[0], transform[2], transform[4], transform[6]];
+  const ys = [transform[1], transform[3], transform[5], transform[7]];
+  const left = Math.min(...xs);
+  const right = Math.max(...xs);
+  const top = Math.min(...ys);
+  const bottom = Math.max(...ys);
+  const rotate = spec.rotate ?? 'horizontal';
+  const perspective = spec.perspective ?? 0;
+  const perspectiveOther = spec.perspectiveOther ?? 0;
+
+  if (spec.style === 'cylinder') {
+    const seededCurve = 0.5 + (spec.bend ?? 18) / 200;
+    const curve = Math.max(0.02, Math.min(0.98, spec.cylinderCurve ?? seededCurve));
+    const height = Math.max(1, bottom - top);
+    const inset = Math.min(height * 0.18, Math.abs(curve - 0.5) * height * 0.55);
+    const boundsTop = top + inset;
+    const boundsBottom = bottom - inset;
+    return {
+      style: 'cylinder',
+      values: [left, boundsBottom, right, boundsTop, 0.5, 0.5, curve],
+      perspective,
+      perspectiveOther,
+      rotate,
+      bounds: {
+        top: { value: boundsTop, units: 'Pixels' },
+        left: { value: left, units: 'Pixels' },
+        bottom: { value: boundsBottom, units: 'Pixels' },
+        right: { value: right, units: 'Pixels' },
+      },
+      uOrder: 4,
+      vOrder: 4,
+    };
+  }
+
+  return {
+    style: spec.style,
+    value: spec.bend ?? 0,
+    perspective,
+    perspectiveOther,
+    rotate,
+  };
+}
+
 async function compileLayer(spec: LayerSpec, ctx: CompileContext): Promise<any> {
   ctx.layerCount += 1;
 
@@ -261,6 +306,7 @@ async function compileLayer(spec: LayerSpec, ctx: CompileContext): Promise<any> 
     const placedId = randomUUID();
     const sourceBytes = await getSourceBytes(ctx, source);
     ctx.linkedFiles.push({ id: linkId, name: path.basename(source), data: sourceBytes });
+    const nativeWarp = spec.nativeWarp ? compileNativeWarp(spec.nativeWarp, placedTransform) : undefined;
     layer.placedLayer = {
       id: linkId,
       placed: placedId,
@@ -269,7 +315,9 @@ async function compileLayer(spec: LayerSpec, ctx: CompileContext): Promise<any> 
       width: original.width,
       height: original.height,
       resolution: { value: spec.dpi ?? ctx.dpi, units: 'Density' },
+      ...(nativeWarp ? { warp: nativeWarp } : {}),
     };
+    if (nativeWarp) ctx.warnings.push(`Smart object "${spec.name}" contains native Photoshop ${spec.nativeWarp!.style} warp metadata. Run the UXP finalizer after replacement for Photoshop-native cache rendering.`);
   }
 
   return layer;

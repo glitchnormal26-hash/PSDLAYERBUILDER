@@ -15,6 +15,23 @@ export type BlendMode =
 export type Quad = [number, number, number, number, number, number, number, number];
 export type Point = [number, number];
 export type VectorBooleanOperation = 'combine' | 'subtract' | 'intersect' | 'exclude';
+export type NativeWarpStyle =
+  | 'cylinder'
+  | 'arc'
+  | 'arcLower'
+  | 'arcUpper'
+  | 'arch'
+  | 'bulge'
+  | 'shellLower'
+  | 'shellUpper'
+  | 'flag'
+  | 'wave'
+  | 'fish'
+  | 'rise'
+  | 'fisheye'
+  | 'inflate'
+  | 'squeeze'
+  | 'twist';
 
 export interface DropShadowEffectSpec {
   color?: string;
@@ -80,6 +97,17 @@ export interface DisplacementSpec {
   edge?: 'clamp' | 'transparent';
 }
 
+export interface NativeWarpSpec {
+  style: NativeWarpStyle;
+  /** Photoshop warp bend/value. For cylinder this also seeds cylinderCurve when omitted. */
+  bend?: number;
+  perspective?: number;
+  perspectiveOther?: number;
+  rotate?: 'horizontal' | 'vertical';
+  /** Cylinder envelope control in the 0..1 range; 0.5 is neutral, ~0.57 is a subtle cylindrical wrap. */
+  cylinderCurve?: number;
+}
+
 export interface BaseLayerSpec {
   name: string;
   visible?: boolean;
@@ -120,6 +148,8 @@ export interface SmartObjectLayerSpec extends BaseLayerSpec {
   mask?: LayerMaskSpec;
   vectorMask?: VectorMaskSpec;
   displacement?: DisplacementSpec;
+  /** Native Photoshop warp metadata. Cylinder is useful for cans, bottles and jars. */
+  nativeWarp?: NativeWarpSpec;
 }
 
 export interface TextLayerSpec extends BaseLayerSpec {

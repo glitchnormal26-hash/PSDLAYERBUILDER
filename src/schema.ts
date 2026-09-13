@@ -5,6 +5,11 @@ const blendModes = [
   'color dodge', 'color burn', 'hard light', 'soft light', 'difference', 'exclusion',
 ] as const;
 
+const warpStyles = [
+  'cylinder', 'arc', 'arcLower', 'arcUpper', 'arch', 'bulge', 'shellLower', 'shellUpper',
+  'flag', 'wave', 'fish', 'rise', 'fisheye', 'inflate', 'squeeze', 'twist',
+] as const;
+
 const hexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/);
 const opacity = z.number().min(0).max(1);
 const pixelAmount = z.number().finite().min(0).max(10000);
@@ -78,6 +83,15 @@ const displacement = z.object({
   edge: z.enum(['clamp', 'transparent']).optional(),
 });
 
+const nativeWarp = z.object({
+  style: z.enum(warpStyles),
+  bend: z.number().finite().min(-100).max(100).optional(),
+  perspective: z.number().finite().min(-100).max(100).optional(),
+  perspectiveOther: z.number().finite().min(-100).max(100).optional(),
+  rotate: z.enum(['horizontal', 'vertical']).optional(),
+  cylinderCurve: z.number().finite().min(0.02).max(0.98).optional(),
+});
+
 const rasterLayer = z.object({
   ...baseLayer,
   type: z.literal('raster'),
@@ -109,6 +123,7 @@ const smartObjectLayer = z.object({
   mask: mask.optional(),
   vectorMask: vectorMask.optional(),
   displacement: displacement.optional(),
+  nativeWarp: nativeWarp.optional(),
 });
 
 const textLayer = z.object({

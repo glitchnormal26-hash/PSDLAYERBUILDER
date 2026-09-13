@@ -1,9 +1,12 @@
 export { doctorPsd } from './doctor.js';
 export { buildMockup, buildMockupFile } from './engine.js';
 export { inspectPsd } from './inspect.js';
-export * from './magnific.js';
+export { preflightMagnific, preflightMagnificBatch } from './magnific.js';
 export { replaceSmartObject, replaceSmartObjects, replaceSmartObjectsFromMap } from './template.js';
+export { candidateVectorMask, detectMockupSurfaces } from './surface-detection.js';
 export { applyVectorMaskForComposite, compileVectorMask, vectorMaskContains } from './vector-mask.js';
 export { warpPerspective } from './perspective.js';
 export { mockupManifestSchema, replacementMapSchema } from './schema.js';
 export type * from './types.js';
+export type { DetectedSurfaceKind, SurfaceCandidate, SurfaceCandidateMetrics, SurfaceDetectionOptions, SurfaceDetectionResult, SurfaceHint } from './surface-detection.js';
+export type { MagnificAssetType, MagnificCheck, MagnificPreflightOptions, MagnificPreflightResult } from './magnific.js';
