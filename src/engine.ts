@@ -214,5 +214,8 @@ export async function buildMockup(input: unknown, options: BuildOptions): Promis
 export async function buildMockupFile(manifestFile: string, output: string): Promise<BuildResult> {
   const absoluteManifest = path.resolve(manifestFile);
   const source = JSON.parse(await readFile(absoluteManifest, 'utf8'));
-  return buildMockup(source, { output, cwd: path.dirname(absoluteManifest) });
+  return buildMockup(source, {
+    output: path.resolve(output),
+    cwd: path.dirname(absoluteManifest),
+  });
 }
