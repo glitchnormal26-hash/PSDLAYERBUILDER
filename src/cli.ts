@@ -4,13 +4,14 @@ import { ZodError } from 'zod';
 import { doctorPsd } from './doctor.js';
 import { buildMockupFile } from './engine.js';
 import { inspectPsd } from './inspect.js';
+import { preflightMagnific, preflightMagnificBatch, type MagnificAssetType } from './magnific.js';
 import { replaceSmartObjects, replaceSmartObjectsFromMap } from './template.js';
 
 const program = new Command();
 program
   .name('psdlayer')
   .description('Build, validate and modify editable layered PSD mockups')
-  .version('1.1.0');
+  .version('1.2.0');
 
 program.command('build')
   .argument('<manifest>', 'Path to mockup manifest JSON')
@@ -98,6 +99,47 @@ program.command('doctor')
       reportError(error);
     }
   });
+
+program.command('magnific-check')
+  .argument('<psd>', 'PSD resource to preflight for Magnific Contributor')
+  .requiredOption('--preview <jpg>', 'Same-name JPG preview')
+  .option('--type <type>', 'mockup, template, or graphic-elements', 'mockup')
+  .option('--ai', 'Mark the resource as containing AI-generated material')
+  .option('--strict', 'Treat warnings as a failing result')
+  .action(async (psdFile, options) => {
+    try {
+      const type = parseMagnificType(options.type);
+      const result = await preflightMagnific(psdFile, options.preview, { type, createdByAi: Boolean(options.ai) });
+      console.log(JSON.stringify(result, null, 2));
+      const hasWarning = result.checks.some((item) => item.status === 'warning');
+      if (!result.ok || (options.strict && hasWarning)) process.exitCode = 2;
+    } catch (error) {
+      reportError(error);
+    }
+  });
+
+program.command('magnific-batch')
+  .argument('<directory>', 'Directory containing same-name PSD + JPG pairs')
+  .option('--type <type>', 'mockup, template, or graphic-elements', 'mockup')
+  .option('--ai', 'Mark the resources as containing AI-generated material')
+  .option('--strict', 'Treat warnings as a failing result')
+  .action(async (directory, options) => {
+    try {
+      const type = parseMagnificType(options.type);
+      const result = await preflightMagnificBatch(directory, { type, createdByAi: Boolean(options.ai) });
+      console.log(JSON.stringify(result, null, 2));
+      const hasWarning = result.results.some((entry) => entry.checks.some((item) => item.status === 'warning'));
+      if (!result.ok || (options.strict && hasWarning)) process.exitCode = 2;
+    } catch (error) {
+      reportError(error);
+    }
+  });
+
+function parseMagnificType(value: unknown): MagnificAssetType {
+  const type = String(value);
+  if (type === 'mockup' || type === 'template' || type === 'graphic-elements') return type;
+  throw new Error('Invalid Magnific type. Use mockup, template, or graphic-elements.');
+}
 
 function reportError(error: unknown): void {
   if (error instanceof ZodError) {
