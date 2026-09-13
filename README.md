@@ -5,15 +5,19 @@ Manifest-driven engine for generating and modifying Photoshop PSD mockups with a
 ## Core capabilities
 
 - Nested Photoshop groups
-- Raster layers with position, size, opacity, visibility and common blend modes
-- Embedded smart objects with the original source stored inside the PSD
-- **Perspective smart objects** using an 8-point document-space quad, including a generated perspective raster cache
-- **Template replacement**: replace a named smart object inside an existing PSD while preserving the rest of the template
+- Raster layers with position, size, opacity, visibility and blend modes
+- Embedded smart objects with original source bytes stored inside the PSD
+- Perspective smart objects using an 8-point document-space quad
+- Native bitmap layer masks
+- Native Photoshop clipping-mask flags
+- Native editable layer effects: drop shadow, stroke and color overlay
+- Displacement-map raster-cache preview for fabric, paper and curved-surface mockups
+- Template replacement: replace a named smart object inside an existing PSD while preserving the rest of the template
 - Editable text metadata
 - Composite preview for generated PSDs
 - CLI commands to build, replace and inspect PSD files
 
-The portable writer uses `ag-psd` 31.0.2. The manifest model is kept separate from the PSD backend so a Photoshop UXP, Rust or cloud backend can be added later without changing mockup definitions.
+The portable writer uses `ag-psd` 31.0.2. The manifest model is backend-neutral so a Photoshop UXP, Rust or cloud backend can be added later without changing mockup definitions.
 
 ## Quick start
 
@@ -31,7 +35,7 @@ npm run build
 node dist/cli.js build path/to/mockup.json -o output/mockup.psd
 ```
 
-### Replace a smart object in an existing template
+### Replace a smart object in an existing Photoshop template
 
 ```bash
 node dist/cli.js replace template.psd \
@@ -46,9 +50,9 @@ node dist/cli.js replace template.psd \
 node dist/cli.js inspect output/final.psd
 ```
 
-## Manifest
+## Manifest example
 
-Layer order is **top to bottom**, matching the Photoshop Layers panel. Paths in `source` are relative to the manifest file.
+Layer order is top-to-bottom, matching the Photoshop Layers panel. Asset paths are relative to the manifest file.
 
 ```json
 {
@@ -64,7 +68,34 @@ Layer order is **top to bottom**, matching the Photoshop Layers panel. Paths in 
       "type": "smart-object",
       "name": "YOUR DESIGN",
       "source": "assets/design.png",
-      "quad": [420, 330, 1570, 380, 1500, 1100, 500, 1040]
+      "quad": [420, 330, 1570, 380, 1500, 1100, 500, 1040],
+      "mask": {
+        "source": "assets/product-mask.png",
+        "feather": 1.5
+      },
+      "displacement": {
+        "source": "assets/fabric-displacement.png",
+        "scaleX": 8,
+        "scaleY": 5,
+        "channel": "luminance"
+      },
+      "effects": {
+        "stroke": {
+          "size": 2,
+          "position": "inside",
+          "color": "#ffffff",
+          "opacity": 0.7
+        }
+      }
+    },
+    {
+      "type": "raster",
+      "name": "LIGHTING",
+      "source": "assets/highlight.png",
+      "x": 420,
+      "y": 330,
+      "blendMode": "screen",
+      "clipping": true
     },
     {
       "type": "raster",
@@ -73,87 +104,79 @@ Layer order is **top to bottom**, matching the Photoshop Layers panel. Paths in 
       "x": 450,
       "y": 1000,
       "opacity": 0.45,
-      "blendMode": "multiply"
+      "blendMode": "multiply",
+      "effects": {
+        "dropShadow": {
+          "color": "#000000",
+          "opacity": 0.25,
+          "angle": 120,
+          "distance": 18,
+          "size": 28,
+          "spread": 0
+        }
+      }
     }
   ]
 }
 ```
 
-For axis-aligned placement, omit `quad` and use `x`, `y`, `width`, and `height` instead.
+For axis-aligned smart-object placement, omit `quad` and use `x`, `y`, `width`, and `height`.
 
-## Why there are two workflows
+## Masks
 
-### 1. Build from scratch
+`mask.source` can be PNG/JPEG/WebP. RGB is converted to luminance and multiplied by source alpha. White reveals, black hides. `invert`, `feather`, explicit mask bounds and Photoshop `defaultColor` are supported. The mask is written as native PSD user-mask data, while the generated composite preview also applies it.
 
-Use JSON when the mockup is programmatically defined. The engine creates groups, raster layers, text metadata and embedded smart objects. Perspective artwork is rasterized into the layer cache with a projective transform while the source remains embedded and editable.
+## Clipping masks
 
-### 2. Replace inside a Photoshop-made template
+Set `"clipping": true` on a layer to store Photoshop's native clipping flag. Photoshop will clip it to the eligible layer beneath it. The lightweight generated composite does not currently emulate clipping groups; the PSD layer structure remains editable and correct for Photoshop.
 
-Use `replace` when the visual mockup already exists in Photoshop and contains lighting, masks, effects, displacement or other authored details. PSDLAYERBUILDER finds the named smart object, replaces its embedded source, refreshes the projective cache, and writes a new PSD without flattening the template.
+## Layer effects
 
-This is the preferred production workflow for high-fidelity product mockups because Photoshop-authored effects stay in the source template.
+Supported manifest effects are `dropShadow`, `stroke`, and `colorOverlay`. They are stored as editable Photoshop layer effects rather than baked pixels. The convenience composite does not render these effects.
 
-## Architecture
+## Displacement maps
 
-```text
-                    ┌──────── build ──────── mockup.json
-                    │                          │
-artwork.png ────────┤                    Zod validation
-                    │                          │
-                    │                    layer compiler
-                    │                          │
-                    │                 perspective rasterizer
-                    │                          │
-                    │                    ag-psd writer
-                    │                          │
-                    └──────── replace ─── template.psd
-                                               │
-                                        named smart object
-                                               │
-                                      embedded source swap
-                                               │
-                                        ag-psd writer
-                                               │
-                                               ▼
-                                           output.psd
-```
+`displacement` deforms the raster cache using inverse sampling with bilinear interpolation. A value of 128 is neutral; darker and brighter values shift sampling in opposite directions. Supported channels are `luminance`, `red`, `green`, `blue`, and `alpha`, with `clamp` or `transparent` edge handling.
 
-## Smart objects
+For smart objects, displacement is intentionally cache-only in the portable backend: the embedded artwork remains editable, but the PSD does not contain a native Photoshop Displace smart filter. For production mockups requiring editable Photoshop smart filters, author the filter in a template and use the `replace` workflow; template metadata is preserved.
 
-Each generated smart-object layer contains both a cached raster and the original artwork bytes via PSD linked-file metadata. The `placedLayer.transform` stores the placement quad, so the layer remains a smart object instead of becoming a permanently flattened raster.
+## Production workflows
 
-The built-in perspective rasterizer uses inverse projective mapping and bilinear RGBA sampling. This gives non-Photoshop readers a meaningful cache while Photoshop still receives the embedded source and placement metadata.
+### Build from scratch
 
-## Text layers
+Use JSON when the mockup is programmatically defined. The engine creates groups, raster layers, editable metadata, masks, effects and embedded smart objects.
 
-Text is written as editable Photoshop text metadata and the writer asks Photoshop to re-render it. `ag-psd` text-layer generation is not complete, so Photoshop can show a refresh/update prompt on first open. For pixel-perfect automated typography, a later Photoshop UXP backend can perform the final render.
+### Replace inside a Photoshop-authored template
+
+Use `replace` when the visual mockup already exists in Photoshop and contains advanced lighting, masks, effects, smart filters, displacement, warp or other authored details. PSDLAYERBUILDER replaces the named embedded artwork and preserves the template structure through raw PSD channel round-tripping.
+
+This is the preferred workflow for high-fidelity apparel, packaging and product mockups.
 
 ## Current boundaries
 
 - Portable authoring is RGB PSD, not PSB.
-- A Photoshop `warp` beyond the 4-corner projective transform is preserved by the template workflow, but the portable cache only renders the projective part; Photoshop should perform the final warp render.
-- Generated composite previews use normal alpha compositing. Layer blend modes/effects remain stored on layers but are not fully reproduced in the flattened convenience preview.
-- PSD dimensions are capped at 30,000 × 30,000 and the manifest has a 300 MP guard. Composite and perspective cache generation have an 80 MP memory guard.
+- Perspective uses a 4-corner projective transform. Complex Photoshop warp is preserved by the template workflow but not authored from JSON yet.
+- Generated composite previews use normal alpha compositing; Photoshop blend/effect/clipping semantics are stored but not fully rasterized into that convenience preview.
+- PSD dimensions are capped at 30,000 x 30,000 with a 300 MP manifest guard. Composite and displacement preview work has an 80 MP guard.
 - Remote asset URLs are rejected to keep builds deterministic.
 
 ## Development
 
 ```bash
+npm install
 npm run typecheck
 npm test
 npm run build
 ```
 
-CI runs those checks on pushes and pull requests.
+CI runs these checks on pushes and pull requests.
 
 ## Roadmap
 
-1. Raster/vector masks and clipping-mask manifest syntax
-2. Layer effects (drop shadow, stroke, overlays)
-3. Displacement-map preview backend
-4. Photoshop UXP finalizer for native warp/text cache regeneration
-5. Multiple named slot replacement in one command
-6. Optional PSB backend for very large documents
+1. Multiple named smart-object replacements in a single command
+2. Native vector-mask authoring
+3. Photoshop UXP finalizer for native smart filters, custom warp and exact text rendering
+4. Optional PSB backend for very large documents
 
 ## License
 

@@ -5,12 +5,62 @@ const blendModes = [
   'color dodge', 'color burn', 'hard light', 'soft light', 'difference', 'exclusion',
 ] as const;
 
+const hexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/);
+const opacity = z.number().min(0).max(1);
+const pixelAmount = z.number().finite().min(0).max(10000);
+
+const effects = z.object({
+  dropShadow: z.object({
+    color: hexColor.optional(),
+    opacity: opacity.optional(),
+    angle: z.number().finite().min(-360).max(360).optional(),
+    distance: pixelAmount.optional(),
+    size: pixelAmount.optional(),
+    spread: pixelAmount.optional(),
+    blendMode: z.enum(blendModes).optional(),
+    useGlobalLight: z.boolean().optional(),
+  }).optional(),
+  stroke: z.object({
+    color: hexColor.optional(),
+    opacity: opacity.optional(),
+    size: pixelAmount.optional(),
+    position: z.enum(['inside', 'center', 'outside']).optional(),
+    blendMode: z.enum(blendModes).optional(),
+  }).optional(),
+  colorOverlay: z.object({
+    color: hexColor.optional(),
+    opacity: opacity.optional(),
+    blendMode: z.enum(blendModes).optional(),
+  }).optional(),
+}).optional();
+
 const baseLayer = {
   name: z.string().min(1).max(255),
   visible: z.boolean().optional(),
-  opacity: z.number().min(0).max(1).optional(),
+  opacity: opacity.optional(),
   blendMode: z.enum(blendModes).optional(),
+  clipping: z.boolean().optional(),
+  effects,
 };
+
+const mask = z.object({
+  source: z.string().min(1),
+  x: z.number().finite().optional(),
+  y: z.number().finite().optional(),
+  width: z.number().int().positive().optional(),
+  height: z.number().int().positive().optional(),
+  invert: z.boolean().optional(),
+  feather: z.number().finite().min(0).max(10000).optional(),
+  defaultColor: z.union([z.literal(0), z.literal(255)]).optional(),
+});
+
+const displacement = z.object({
+  source: z.string().min(1),
+  scaleX: z.number().finite().min(-4096).max(4096).optional(),
+  scaleY: z.number().finite().min(-4096).max(4096).optional(),
+  channel: z.enum(['luminance', 'red', 'green', 'blue', 'alpha']).optional(),
+  edge: z.enum(['clamp', 'transparent']).optional(),
+});
 
 const rasterLayer = z.object({
   ...baseLayer,
@@ -20,6 +70,8 @@ const rasterLayer = z.object({
   y: z.number().finite().optional(),
   width: z.number().int().positive().optional(),
   height: z.number().int().positive().optional(),
+  mask: mask.optional(),
+  displacement: displacement.optional(),
 });
 
 const quad = z.tuple([
@@ -37,6 +89,8 @@ const smartObjectLayer = z.object({
   height: z.number().int().positive().optional(),
   dpi: z.number().positive().max(2400).optional(),
   quad: quad.optional(),
+  mask: mask.optional(),
+  displacement: displacement.optional(),
 });
 
 const textLayer = z.object({
@@ -47,7 +101,7 @@ const textLayer = z.object({
   y: z.number().finite(),
   font: z.string().min(1).optional(),
   size: z.number().positive().max(2000).optional(),
-  color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+  color: hexColor.optional(),
 });
 
 let layerSchema: any;
@@ -69,7 +123,7 @@ export const mockupManifestSchema = z.object({
     width: z.number().int().positive().max(30000),
     height: z.number().int().positive().max(30000),
     dpi: z.number().positive().max(2400).optional(),
-    background: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+    background: hexColor.optional(),
   }).refine((doc) => doc.width * doc.height <= 300_000_000, {
     message: 'Document exceeds the 300 megapixel safety limit',
   }),

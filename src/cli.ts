@@ -9,7 +9,7 @@ const program = new Command();
 program
   .name('psdlayer')
   .description('Build and modify editable layered PSD mockups')
-  .version('0.2.0');
+  .version('0.3.0');
 
 program.command('build')
   .argument('<manifest>', 'Path to mockup manifest JSON')

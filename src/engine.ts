@@ -2,10 +2,12 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { writePsdBuffer } from 'ag-psd';
+import { displaceRgba } from './displacement.js';
+import { compileEffects } from './effects.js';
 import { readRgba, imageMetadata, parseHexColor, solidRgba, type RgbaImage } from './image.js';
 import { warpPerspective } from './perspective.js';
 import { mockupManifestSchema } from './schema.js';
-import type { BuildOptions, BuildResult, LayerSpec, MockupManifest, Quad } from './types.js';
+import type { BuildOptions, BuildResult, LayerMaskSpec, LayerSpec, MockupManifest, Quad } from './types.js';
 
 interface CompileContext {
   cwd: string;
@@ -15,6 +17,8 @@ interface CompileContext {
   layerCount: number;
   warnings: string[];
   compositeEntries: CompositeEntry[];
+  warnedCompositeClipping: boolean;
+  warnedCompositeEffects: boolean;
 }
 
 interface CompositeEntry {
@@ -24,18 +28,99 @@ interface CompositeEntry {
   opacity: number;
 }
 
+interface CompiledMask {
+  image: RgbaImage;
+  left: number;
+  top: number;
+  defaultColor: 0 | 255;
+  native: any;
+}
+
 function resolveSource(cwd: string, source: string): string {
   if (/^[a-z]+:\/\//i.test(source)) throw new Error(`Remote sources are not allowed: ${source}`);
   return path.resolve(cwd, source);
 }
 
-function commonLayer(spec: LayerSpec) {
+function commonLayer(spec: LayerSpec, ctx: CompileContext) {
+  const effects = compileEffects(spec.effects);
+  if (effects && !ctx.warnedCompositeEffects) {
+    ctx.warnings.push('Layer effects are stored as editable Photoshop effects; the convenience composite preview does not rasterize them.');
+    ctx.warnedCompositeEffects = true;
+  }
+  if (spec.clipping && !ctx.warnedCompositeClipping) {
+    ctx.warnings.push('Clipping masks are stored natively; the convenience composite preview does not emulate clipping groups.');
+    ctx.warnedCompositeClipping = true;
+  }
   return {
     name: spec.name,
     hidden: spec.visible === false,
     opacity: spec.opacity ?? 1,
     blendMode: spec.blendMode ?? 'normal',
+    clipping: spec.clipping ?? false,
+    ...(effects ? { effects } : {}),
   };
+}
+
+function grayscaleMask(source: RgbaImage, invert: boolean): RgbaImage {
+  const data = new Uint8Array(source.data.length);
+  for (let i = 0; i < source.data.length; i += 4) {
+    const lum = Math.round(source.data[i] * 0.2126 + source.data[i + 1] * 0.7152 + source.data[i + 2] * 0.0722);
+    let value = Math.round(lum * (source.data[i + 3] / 255));
+    if (invert) value = 255 - value;
+    data[i] = value;
+    data[i + 1] = value;
+    data[i + 2] = value;
+    data[i + 3] = 255;
+  }
+  return { width: source.width, height: source.height, data };
+}
+
+async function compileMask(spec: LayerMaskSpec, layerLeft: number, layerTop: number, width: number, height: number, ctx: CompileContext): Promise<CompiledMask> {
+  const source = resolveSource(ctx.cwd, spec.source);
+  const maskWidth = Math.round(spec.width ?? width);
+  const maskHeight = Math.round(spec.height ?? height);
+  const image = grayscaleMask(await readRgba(source, maskWidth, maskHeight), spec.invert ?? false);
+  const left = Math.round(spec.x ?? layerLeft);
+  const top = Math.round(spec.y ?? layerTop);
+  const defaultColor = spec.defaultColor ?? 0;
+
+  return {
+    image,
+    left,
+    top,
+    defaultColor,
+    native: {
+      top,
+      left,
+      bottom: top + image.height,
+      right: left + image.width,
+      defaultColor,
+      disabled: false,
+      positionRelativeToLayer: false,
+      fromVectorData: false,
+      userMaskFeather: spec.feather ?? 0,
+      imageData: image,
+    },
+  };
+}
+
+function applyMaskForComposite(source: RgbaImage, layerLeft: number, layerTop: number, mask: CompiledMask): RgbaImage {
+  const data = new Uint8Array(source.data);
+  for (let y = 0; y < source.height; y += 1) {
+    const docY = layerTop + y;
+    for (let x = 0; x < source.width; x += 1) {
+      const docX = layerLeft + x;
+      const mx = docX - mask.left;
+      const my = docY - mask.top;
+      let value = mask.defaultColor;
+      if (mx >= 0 && my >= 0 && mx < mask.image.width && my < mask.image.height) {
+        value = mask.image.data[(my * mask.image.width + mx) * 4];
+      }
+      const i = (y * source.width + x) * 4;
+      data[i + 3] = Math.round(data[i + 3] * (value / 255));
+    }
+  }
+  return { width: source.width, height: source.height, data };
 }
 
 async function compileLayer(spec: LayerSpec, ctx: CompileContext): Promise<any> {
@@ -44,14 +129,14 @@ async function compileLayer(spec: LayerSpec, ctx: CompileContext): Promise<any> 
   if (spec.type === 'group') {
     const children = [];
     for (const child of spec.children) children.push(await compileLayer(child, ctx));
-    return { ...commonLayer(spec), opened: spec.opened ?? true, children };
+    return { ...commonLayer(spec, ctx), opened: spec.opened ?? true, children };
   }
 
   if (spec.type === 'text') {
     const color = parseHexColor(spec.color ?? '#111111');
     ctx.warnings.push(`Text layer "${spec.name}" is editable, but Photoshop may ask to refresh text rendering on first open.`);
     return {
-      ...commonLayer(spec),
+      ...commonLayer(spec, ctx),
       text: {
         text: spec.text,
         transform: [1, 0, 0, 1, spec.x, spec.y],
@@ -90,15 +175,32 @@ async function compileLayer(spec: LayerSpec, ctx: CompileContext): Promise<any> 
     }
   }
 
-  if (spec.visible !== false) ctx.compositeEntries.push({ image: preview, left: x, top: y, opacity: spec.opacity ?? 1 });
+  if (spec.displacement) {
+    const pixels = preview.width * preview.height;
+    if (pixels > 80_000_000) {
+      ctx.warnings.push(`Displacement skipped for "${spec.name}" because its preview exceeds 80 megapixels.`);
+    } else {
+      const mapPath = resolveSource(ctx.cwd, spec.displacement.source);
+      const map = await readRgba(mapPath, preview.width, preview.height);
+      preview = displaceRgba(preview, map, spec.displacement);
+      if (spec.type === 'smart-object') {
+        ctx.warnings.push(`Displacement on smart object "${spec.name}" is baked into the raster cache only; the embedded artwork remains editable but does not contain a native Photoshop displacement filter.`);
+      }
+    }
+  }
+
+  const mask = spec.mask ? await compileMask(spec.mask, x, y, preview.width, preview.height, ctx) : undefined;
+  const compositePreview = mask ? applyMaskForComposite(preview, x, y, mask) : preview;
+  if (spec.visible !== false) ctx.compositeEntries.push({ image: compositePreview, left: x, top: y, opacity: spec.opacity ?? 1 });
 
   const layer: any = {
-    ...commonLayer(spec),
+    ...commonLayer(spec, ctx),
     top: y,
     left: x,
     bottom: y + preview.height,
     right: x + preview.width,
     imageData: preview,
+    ...(mask ? { mask: mask.native } : {}),
   };
 
   if (spec.type === 'smart-object') {
@@ -170,6 +272,8 @@ export async function buildMockup(input: unknown, options: BuildOptions): Promis
     layerCount: 0,
     warnings: [],
     compositeEntries: [],
+    warnedCompositeClipping: false,
+    warnedCompositeEffects: false,
   };
 
   const children = [];
