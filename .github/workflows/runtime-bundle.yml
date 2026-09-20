@@ -23,7 +23,7 @@ jobs:
       - run: npm run build
       - name: Pack runnable bundle
         run: tar -czf psdlayerbuilder-runtime.tgz dist node_modules package.json package-lock.json uxp-finalizer
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: psdlayerbuilder-runtime
           path: psdlayerbuilder-runtime.tgz
