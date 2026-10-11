@@ -30,8 +30,8 @@
     "example": "npm run example:assets && npm run build && node dist/cli.js build examples/basic.mockup.json -o examples/output/basic-mockup.psd"
   },
   "dependencies": {
-    "ag-psd": "31.0.2",
-    "commander": "^14.0.3",
+    "ag-psd": "31.0.3",
+    "commander": "^15.0.0",
     "sharp": "^0.35.4",
     "zod": "^4.6.2"
   },
